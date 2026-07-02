@@ -78,7 +78,9 @@ for name in expected:
 # --- 4: config-name drift -----------------------------------------------------
 all_code = "\n".join(cell_source(c) for c in code_cells)
 defining = "\n".join(cell_source(c) for c in code_cells[:4])  # env/config/drive/install
-for knob in ("MODEL_ID", "MAX_SEQ_LEN", "LOAD_IN_4BIT", "LORA_R", "LORA_ALPHA",
+for knob in ("MODEL_ID", "MODEL_SIZE_B", "AUTO_ADJUST", "GPU_VRAM_GB", "RAM_GB",
+             "BF16_OK", "CKPT_EST_GB",
+             "MAX_SEQ_LEN", "LOAD_IN_4BIT", "LORA_R", "LORA_ALPHA",
              "TARGET_MODULES", "LEARNING_RATE", "NUM_EPOCHS", "BATCH_SIZE",
              "GRAD_ACCUM", "WARMUP_RATIO", "WEIGHT_DECAY", "MIN_LR_RATIO",
              "SEED", "SAVE_STEPS", "SAVE_TOTAL_LIMIT", "LOGGING_STEPS",

@@ -55,41 +55,59 @@ This single notebook runs the **entire pipeline** on a Colab instance with a 96G
 
 **If the session dies mid-training:** just `Run all` again. With Google Drive enabled (default), checkpoints persist across sessions and training auto-resumes from the last complete checkpoint. Data prep re-downloads (the VM disk is ephemeral) but the completed steps are cheap relative to training.
 
-**Fallbacks:** if you hit CUDA OOM, set `LOAD_IN_4BIT = True` (QLoRA — ~1–2% quality cost, large VRAM headroom) and run again."""))
+## Hardware tiers — read this first
+
+The notebook auto-detects your GPU and adjusts (precision, 4-bit, sequence length, checkpoint cadence). What each tier can actually do:
+
+**Primary target: the Colab Pro G4 instance (RTX PRO 6000, 96GB VRAM / 180GB RAM / ~200GB disk).** The defaults are tuned for exactly that box and run as-is: 27B bf16 LoRA at 16K sequences, checkpoints on local VM disk, no Google Drive involved.
+
+The auto-adjust cell is a safety net for weaker runtimes only — on the G4 it detects the big-GPU tier and changes nothing. For reference:
+
+| Runtime | VRAM | Feasible | Settings the notebook applies |
+|---|---|---|---|
+| **G4 / 96GB class** | 90GB+ | 27B bf16 LoRA (best quality) | **defaults as-is** |
+| A100-40GB class | 24–48GB | 27B QLoRA | forces `LOAD_IN_4BIT`, seq 8192 |
+| Free tier (T4) | 16GB | ~4–8B model only, QLoRA, fp16 | forces 4-bit, seq 4096; hard-stops if `MODEL_SIZE_B` > 9 |
+
+**Checkpoint persistence:** with `USE_DRIVE = False` (default), checkpoints live on the VM's local disk — auto-resume works within the session (rerun the training cell after a crash), but a fully recycled VM starts over. That is a deliberate trade for a ~15GB Drive account, where the big artifacts wouldn't fit anyway. If you want cross-session insurance, the end-of-run adapter (~1GB) is the thing to save: it fits Drive or uploads to the HF Hub in seconds, and everything downstream (merge, GGUF) can be re-derived from it."""))
 
 # ===========================================================================
 cells.append(md("## Step 0 — Environment check"))
 
 cells.append(py(
-"""# Verify the GPU, disk and RAM match what this notebook is tuned for.
+"""# Detect the GPU, disk and RAM. Later cells adapt to what is found here.
 import shutil, subprocess
 
 gpu_query = subprocess.run(
-    ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+    ["nvidia-smi", "--query-gpu=name,memory.total,compute_cap",
+     "--format=csv,noheader,nounits"],
     capture_output=True, text=True,
 )
 assert gpu_query.returncode == 0, "No GPU found — set Runtime > Change runtime type to a GPU instance."
-gpu_name, vram_mib = gpu_query.stdout.strip().rsplit(",", 1)
-vram_gb = int(vram_mib) / 1024
-print(f"GPU : {gpu_name.strip()} ({vram_gb:.0f} GB VRAM)")
+gpu_name, vram_mib, compute_cap = [s.strip() for s in gpu_query.stdout.strip().rsplit(",", 2)]
+GPU_VRAM_GB = int(vram_mib) / 1024
+# bf16 needs compute capability >= 8.0 (Ampere+). A T4 is 7.5 -> fp16 fallback.
+BF16_OK = float(compute_cap) >= 8.0
+print(f"GPU : {gpu_name} ({GPU_VRAM_GB:.0f} GB VRAM, "
+      f"compute {compute_cap}, {'bf16' if BF16_OK else 'fp16 only'})")
 
 disk = shutil.disk_usage("/")
-disk_free_gb = disk.free / 1024**3
-print(f"Disk: {disk_free_gb:.0f} GB free of {disk.total / 1024**3:.0f} GB")
+DISK_FREE_GB = disk.free / 1024**3
+print(f"Disk: {DISK_FREE_GB:.0f} GB free of {disk.total / 1024**3:.0f} GB")
 
 with open("/proc/meminfo") as fh:
-    ram_gb = int(fh.readline().split()[1]) / 1024**2
-print(f"RAM : {ram_gb:.0f} GB")
+    RAM_GB = int(fh.readline().split()[1]) / 1024**2
+print(f"RAM : {RAM_GB:.0f} GB")
 
-if vram_gb < 90:
-    print("\\n*** WARNING: less than 90GB VRAM. bf16 LoRA on a 27B model will")
-    print("*** likely OOM. Set LOAD_IN_4BIT = True in the CONFIGURATION cell.")
-if disk_free_gb < 150:
-    print("\\n*** WARNING: less than 150GB free disk. The full pipeline (base")
-    print("*** model + merged model + GGUF) needs ~150-180GB. Reduce")
-    print("*** GGUF_QUANTS or expect the guarded export steps to stop safely.")
-if ram_gb < 100:
-    print("\\n*** WARNING: the CPU-side merge step needs ~60-70GB of system RAM.")"""))
+if GPU_VRAM_GB < 20:
+    print("\\nTier: FREE (T4-class). A 27B model does NOT fit this GPU in any")
+    print("mode. Use a ~4-8B model: set MODEL_ID and MODEL_SIZE_B in the next")
+    print("cell. The auto-adjust cell will enforce this and pick safe settings.")
+elif GPU_VRAM_GB < 60:
+    print("\\nTier: MID (A100-40GB class). 27B is feasible as QLoRA only;")
+    print("auto-adjust will set 4-bit + seq 8192.")
+else:
+    print("\\nTier: BIG (90GB+ class). 27B bf16 LoRA runs with the defaults.")"""))
 
 # ===========================================================================
 cells.append(md("""## Step 1 — Configuration
@@ -100,9 +118,15 @@ cells.append(py(
 """# ============================== CONFIGURATION ==============================
 
 # --- model -----------------------------------------------------------------
+# FREE TIER (T4 16GB)? A 27B does not fit — point MODEL_ID at a ~4-8B variant
+# of the same family (check Qwen's HF org for the exact repo id) and set
+# MODEL_SIZE_B to match, e.g.:
+#   MODEL_ID = "Qwen/Qwen3.6-8B"; MODEL_SIZE_B = 8
 MODEL_ID = "Qwen/Qwen3.6-27B"   # verify the exact repo id on hf.co before running
+MODEL_SIZE_B = 27               # billions of params — drives VRAM/disk/RAM guards
 MAX_SEQ_LEN = 16384
-LOAD_IN_4BIT = False            # True = QLoRA fallback (use on OOM / smaller GPUs)
+LOAD_IN_4BIT = False            # True = QLoRA (auto-adjust forces this on <60GB GPUs)
+AUTO_ADJUST = True              # downshift settings to fit the detected GPU
 
 # --- LoRA ------------------------------------------------------------------
 LORA_R = 64
@@ -124,7 +148,10 @@ SEED = 3407
 SAVE_STEPS = 100                # ~1 checkpoint per 45-60 min
 SAVE_TOTAL_LIMIT = 3
 LOGGING_STEPS = 5
-USE_DRIVE = True                # persist checkpoints to Google Drive (recommended)
+USE_DRIVE = False               # G4 default: local disk. True = checkpoints to
+                                # Drive (only useful on small models / small
+                                # checkpoints — a 15GB Drive fits ~5 of the
+                                # 27B's ~2.4GB checkpoints at most)
 
 # --- data mixture (examples per source; see the data-prep cell) -------------
 N_TOOL_CALLING = 8000           # Hermes-format function calling
@@ -145,33 +172,91 @@ print(f"  model={MODEL_ID}  seq={MAX_SEQ_LEN}  4bit={LOAD_IN_4BIT}")
 print(f"  mixture: tool={N_TOOL_CALLING} code={N_CODE} math={N_MATH} general={N_GENERAL}")"""))
 
 # ===========================================================================
-cells.append(md("""## Step 2 — Google Drive (checkpoint persistence)
+cells.append(md("""## Step 1b — Auto-adjust to the detected hardware
 
-Colab VM disk is wiped when a session ends. With `USE_DRIVE = True`, training checkpoints (adapter-sized, ~2GB each, newest 3 kept) go to Drive so a dead session resumes instead of restarting. The big artifacts (merged model, GGUF) stay on local disk — they don't fit a free Drive tier."""))
+Turns the CONFIGURATION values into something that actually fits the GPU this session got. On a free-tier T4 this is the cell that keeps you honest: it **hard-stops** if `MODEL_SIZE_B` is too big for the card (better a clear error now than a cryptic OOM after an hour of downloads), forces QLoRA + fp16-safe settings, shortens sequences, and checkpoints more often because free sessions disconnect more."""))
 
 cells.append(py(
-"""import os
+"""if AUTO_ADJUST:
+    if GPU_VRAM_GB < 20:  # free tier / T4-class
+        assert MODEL_SIZE_B <= 9, (
+            f"MODEL_SIZE_B={MODEL_SIZE_B} cannot fit a {GPU_VRAM_GB:.0f}GB GPU in any "
+            "mode (4-bit weights alone exceed VRAM). On the free tier, set MODEL_ID "
+            "to a ~4-8B variant and MODEL_SIZE_B to match — or buy pay-as-you-go "
+            "compute units (works on a free account) for a bigger runtime.")
+        LOAD_IN_4BIT = True
+        MAX_SEQ_LEN = min(MAX_SEQ_LEN, 4096)
+        GRAD_ACCUM = max(GRAD_ACCUM, 16)   # keep ~65K tokens per optimizer step
+        SAVE_STEPS = min(SAVE_STEPS, 50)   # free sessions die more often
+        SAVE_TOTAL_LIMIT = 2               # 15GB free Drive tier
+        print(f"free-tier profile: 4-bit base, seq {MAX_SEQ_LEN}, "
+              f"grad-accum {GRAD_ACCUM}, checkpoint every {SAVE_STEPS} steps")
+    elif GPU_VRAM_GB < 60:  # A100-40GB class (paid compute units)
+        if MODEL_SIZE_B > 10 and not LOAD_IN_4BIT:
+            LOAD_IN_4BIT = True
+            print("mid-tier profile: forcing 4-bit (QLoRA) — "
+                  f"{MODEL_SIZE_B}B bf16 LoRA needs ~90GB+")
+        MAX_SEQ_LEN = min(MAX_SEQ_LEN, 8192)
+        print(f"mid-tier profile: seq {MAX_SEQ_LEN}")
+    else:
+        print("big-GPU profile: configuration used as-is")
 
+if not BF16_OK:
+    print("GPU has no bf16 support — training and model load will use fp16")
+
+# Sanity: rough VRAM need = weights + LoRA/optimizer + activations headroom.
+weights_gb = MODEL_SIZE_B * (0.65 if LOAD_IN_4BIT else 2.1)
+assert weights_gb + 4 < GPU_VRAM_GB, (
+    f"~{weights_gb:.0f}GB of weights will not fit {GPU_VRAM_GB:.0f}GB VRAM — "
+    "reduce MODEL_SIZE_B / pick a smaller MODEL_ID, or set LOAD_IN_4BIT = True.")
+print(f"estimated weight footprint: ~{weights_gb:.0f}GB of {GPU_VRAM_GB:.0f}GB VRAM")"""))
+
+# ===========================================================================
+cells.append(md("""## Step 2 — Output paths
+
+Default (`USE_DRIVE = False`, the G4 profile): everything on the VM's local disk. Auto-resume works within the session — if training crashes, rerun the cells and it continues from the last checkpoint. If the VM itself gets recycled, the run restarts, so don't let a finished adapter sit around: download it or push it to the HF Hub (Step 12) when training ends.
+
+If you flip `USE_DRIVE = True` (worthwhile mainly for smaller models), this cell measures your actual free Drive space, sizes checkpoint retention to fit (a 15GB account holds a handful of the 27B's ~2.4GB checkpoints), and falls back to local disk with a clear warning if Drive is critically full. Big artifacts (merged model, GGUFs) never touch Drive either way."""))
+
+cells.append(py(
+"""import os, shutil
+
+# A trainer checkpoint = adapter + optimizer moments; rough size by model scale.
+CKPT_EST_GB = max(0.5, MODEL_SIZE_B * 0.09)
+
+RUN_ROOT = "/content/qwen36_finetune"
 if USE_DRIVE:
     try:
         from google.colab import drive
         drive.mount("/content/drive")
-        RUN_ROOT = "/content/drive/MyDrive/qwen36_finetune"
+        drive_free_gb = shutil.disk_usage("/content/drive/MyDrive").free / 1024**3
+        print(f"Drive free space: {drive_free_gb:.1f} GB")
+        if drive_free_gb < CKPT_EST_GB * 1.5 + 1:
+            print(f"*** Drive nearly full (< {CKPT_EST_GB * 1.5 + 1:.0f}GB free) — "
+                  "checkpoints would fail mid-write. Using LOCAL disk instead;")
+            print("*** resume only works within this session. Free Drive space "
+                  "and rerun this cell to get cross-session resume back.")
+        else:
+            RUN_ROOT = "/content/drive/MyDrive/qwen36_finetune"
+            # Fit retention to the space that is actually there (adapter ~1GB
+            # also lands on Drive at the end, hence the -1).
+            fit = int((drive_free_gb - 1) // CKPT_EST_GB)
+            if fit < SAVE_TOTAL_LIMIT:
+                SAVE_TOTAL_LIMIT = max(1, fit)
+                print(f"Drive budget: keeping {SAVE_TOTAL_LIMIT} checkpoint(s) "
+                      f"(~{CKPT_EST_GB:.1f}GB each)")
     except Exception as err:  # not running in Colab, or user declined
         print(f"Drive mount failed ({err}); falling back to local disk.")
-        RUN_ROOT = "/content/qwen36_finetune"
-else:
-    RUN_ROOT = "/content/qwen36_finetune"
 
-OUTPUT_DIR = f"{RUN_ROOT}/runs/sft"            # trainer checkpoints (persist if Drive)
-ADAPTER_DIR = f"{RUN_ROOT}/adapter_final"      # final LoRA adapter (persist if Drive)
-MERGED_DIR = "/content/merged_bf16"            # ~55GB -> local disk only
-GGUF_DIR = "/content/gguf"                     # local disk only
+OUTPUT_DIR = f"{RUN_ROOT}/runs/sft"            # trainer checkpoints
+ADAPTER_DIR = f"{RUN_ROOT}/adapter_final"      # final LoRA adapter
+MERGED_DIR = "/content/merged_bf16"            # big -> local disk only, never Drive
+GGUF_DIR = "/content/gguf"                     # local disk only, never Drive
 DATA_PATH = "/content/data/train.jsonl"
 
 for d in (OUTPUT_DIR, os.path.dirname(DATA_PATH)):
     os.makedirs(d, exist_ok=True)
-print(f"checkpoints -> {OUTPUT_DIR}")
+print(f"checkpoints -> {OUTPUT_DIR}  (keep {SAVE_TOTAL_LIMIT})")
 print(f"adapter     -> {ADAPTER_DIR}")"""))
 
 # ===========================================================================
@@ -450,10 +535,12 @@ cells.append(py(
 """import torch
 from unsloth import FastLanguageModel
 
+DTYPE = torch.bfloat16 if BF16_OK else torch.float16
+
 model, _tok = FastLanguageModel.from_pretrained(
     model_name=MODEL_ID,
     max_seq_length=MAX_SEQ_LEN,
-    dtype=torch.bfloat16,
+    dtype=DTYPE,
     load_in_4bit=LOAD_IN_4BIT,
     trust_remote_code=True,
 )
@@ -499,7 +586,7 @@ print(f"trainable: {trainable/1e6:.1f}M / {total/1e9:.1f}B "
 # ===========================================================================
 cells.append(md("""## Step 8 — Train
 
-Checkpoints every 100 steps to the output dir (Drive if mounted), keeping the newest 3. **Auto-resume:** if a complete checkpoint exists (crashed session, restarted runtime), training continues from it — rerunning this cell never restarts from scratch by accident."""))
+Checkpoints every `SAVE_STEPS` optimizer steps to the output dir from Step 2. **Auto-resume:** if a complete checkpoint exists (training crashed, runtime restarted), rerunning this cell continues from it — it never restarts from scratch by accident."""))
 
 cells.append(py(
 """import glob, os
@@ -517,7 +604,8 @@ args = TrainingArguments(
     weight_decay=WEIGHT_DECAY,
     max_grad_norm=1.0,
     optim="adamw_8bit",
-    bf16=True,
+    bf16=BF16_OK,
+    fp16=not BF16_OK,
     logging_steps=LOGGING_STEPS,
     save_strategy="steps",
     save_steps=SAVE_STEPS,
@@ -558,7 +646,10 @@ trainer.train(resume_from_checkpoint=resume)
 os.makedirs(ADAPTER_DIR, exist_ok=True)
 model.save_pretrained(ADAPTER_DIR)
 tokenizer.save_pretrained(ADAPTER_DIR)
-print(f"adapter saved to {ADAPTER_DIR}")"""))
+print(f"adapter saved to {ADAPTER_DIR}")
+print("NOTE: the adapter (~1GB) is the one artifact worth getting off this VM "
+      "immediately — download it or run the HF upload step. Everything "
+      "downstream (merge, GGUF) can be re-derived from it.")"""))
 
 # ===========================================================================
 cells.append(md("## Step 9 — Generation smoke test\n\nQuick sanity check with the trained adapter still in VRAM: one planning prompt, one STEM prompt. Not a real evaluation (use the project's `evals/` suite for that) — just proof the artifact behaves before you spend an hour merging."))
@@ -582,9 +673,9 @@ for user_prompt in [
                            skip_special_tokens=True))"""))
 
 # ===========================================================================
-cells.append(md("""## Step 10 — Merge LoRA → bf16 checkpoint
+cells.append(md("""## Step 10 — Merge LoRA → 16-bit checkpoint
 
-Frees the training model from VRAM, then merges on **CPU** (needs ~60GB system RAM, which this instance has). Disk math is guarded: the merge needs ~58GB free; after the merged output is verified on disk, the ~55GB base-model download cache is deleted to make room for GGUF export.
+Frees the training model from VRAM, then merges on **CPU** — the G4's 180GB of system RAM handles the 27B comfortably (the guard scales with `MODEL_SIZE_B` and stops cleanly on smaller runtimes). Disk math is guarded too: the merged output needs ~2.2GB per billion params free; after it is verified on disk, the base-model download cache is deleted to make room for GGUF export.
 
 Skip this and Step 11 entirely if you only want the LoRA adapter (it's already saved)."""))
 
@@ -598,17 +689,22 @@ for _name in ("trainer", "model"):
 gc.collect()
 torch.cuda.empty_cache()
 
+merged_need_gb = MODEL_SIZE_B * 2.2
 free_gb = shutil.disk_usage("/").free / 1024**3
-assert free_gb > 58, (
-    f"only {free_gb:.0f}GB free — the bf16 merge needs ~58GB. Delete GGUF_QUANTS "
-    "artifacts or old files and rerun this cell.")
+assert free_gb > merged_need_gb + 3, (
+    f"only {free_gb:.0f}GB free — the merge needs ~{merged_need_gb:.0f}GB. "
+    "Delete old artifacts and rerun this cell.")
+assert RAM_GB > MODEL_SIZE_B * 2.4, (
+    f"{RAM_GB:.0f}GB system RAM is not enough to CPU-merge a {MODEL_SIZE_B}B "
+    "model (~{:.0f}GB needed). Download the adapter and merge on a bigger "
+    "machine with training/merge_and_export.py.".format(MODEL_SIZE_B * 2.4))
 
 from peft import PeftModel
 from transformers import AutoModelForCausalLM
 
 print("loading base model on CPU (RAM, not VRAM) — this takes a while...")
 base = AutoModelForCausalLM.from_pretrained(
-    MODEL_ID, torch_dtype=torch.bfloat16, device_map="cpu",
+    MODEL_ID, torch_dtype=DTYPE, device_map="cpu",
     trust_remote_code=True)
 merged = PeftModel.from_pretrained(base, ADAPTER_DIR).merge_and_unload()
 os.makedirs(MERGED_DIR, exist_ok=True)
@@ -621,10 +717,11 @@ gc.collect()
 merged_gb = sum(f.stat().st_size for f in __import__("pathlib").Path(MERGED_DIR)
                 .rglob("*") if f.is_file()) / 1024**3
 has_weights = any(fn.endswith(".safetensors") for fn in os.listdir(MERGED_DIR))
-assert has_weights and merged_gb > 10, "merge verification FAILED — not deleting anything"
+assert has_weights and merged_gb > MODEL_SIZE_B, \
+    "merge verification FAILED — not deleting anything"
 print(f"merged model verified: {merged_gb:.1f} GB at {MERGED_DIR}")
 
-# Reclaim the base-model hub cache (~55GB).
+# Reclaim the base-model hub cache.
 cache = os.path.expanduser(
     "~/.cache/huggingface/hub/models--" + MODEL_ID.replace("/", "--"))
 if os.path.isdir(cache):
@@ -635,9 +732,9 @@ if os.path.isdir(cache):
 # ===========================================================================
 cells.append(md("""## Step 11 — GGUF export
 
-Clones and builds llama.cpp, converts the merged model to an f16 GGUF intermediate, then quantizes to each format in `GGUF_QUANTS` — **one at a time, disk-guarded**. Sizes for a 27B: Q4_K_M ≈ 17GB, Q6_K ≈ 24GB, Q8_0 ≈ 30GB, f16 intermediate ≈ 55GB.
+Clones and builds llama.cpp, converts the merged model to an f16 GGUF intermediate, then quantizes to each format in `GGUF_QUANTS` — **one at a time, disk-guarded** (guards scale with `MODEL_SIZE_B`). Sizes for a 27B: Q4_K_M ≈ 17GB, Q6_K ≈ 24GB, Q8_0 ≈ 30GB, f16 intermediate ≈ 55GB.
 
-Download the finished `.gguf` from the Colab file browser, or push it to the Hub in Step 12 (free Google Drive won't fit it)."""))
+Download the finished `.gguf` from the Colab file browser, or push it to the Hub in Step 12 — GGUFs never go to Drive."""))
 
 cells.append(py(
 """import shutil, subprocess
@@ -657,9 +754,11 @@ if GGUF_QUANTS:
     os.makedirs(GGUF_DIR, exist_ok=True)
     f16_path = f"{GGUF_DIR}/model-f16.gguf"
 
+    f16_need_gb = MODEL_SIZE_B * 2.1
     free_gb = shutil.disk_usage("/").free / 1024**3
-    assert free_gb > 60, (f"only {free_gb:.0f}GB free — the f16 GGUF intermediate "
-                          "needs ~56GB. Free space and rerun.")
+    assert free_gb > f16_need_gb + 4, (
+        f"only {free_gb:.0f}GB free — the f16 GGUF intermediate needs "
+        f"~{f16_need_gb:.0f}GB. Free space and rerun.")
     if not os.path.exists(f16_path):
         subprocess.run(["python", "/content/llama.cpp/convert_hf_to_gguf.py",
                         MERGED_DIR, "--outfile", f16_path, "--outtype", "f16"],
@@ -667,9 +766,11 @@ if GGUF_QUANTS:
 
     for quant in GGUF_QUANTS:
         out_path = f"{GGUF_DIR}/model-{quant.lower()}.gguf"
+        quant_need_gb = MODEL_SIZE_B * 1.2
         free_gb = shutil.disk_usage("/").free / 1024**3
-        assert free_gb > 35, (f"only {free_gb:.0f}GB free before {quant} — "
-                              "download+delete a finished quant, then rerun.")
+        assert free_gb > quant_need_gb, (
+            f"only {free_gb:.0f}GB free before {quant} — download+delete a "
+            "finished quant, then rerun.")
         subprocess.run([quantize_bin, f16_path, out_path, quant], check=True)
         print(f"{out_path}: "
               f"{os.path.getsize(out_path) / 1024**3:.1f} GB")

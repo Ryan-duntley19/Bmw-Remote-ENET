@@ -1,12 +1,21 @@
 # All-in-One Colab Fine-Tune
 
 **`qwen36_27b_finetune_colab.ipynb`** is the single-file deliverable: upload
-it to Google Colab (96GB-VRAM GPU runtime), optionally adjust the
-CONFIGURATION cell, and `Runtime → Run all`. It performs the entire
-pipeline — environment checks, dependency install, dataset download and
-Hermes-format conversion, the mask-verification gate, bf16 LoRA SFT with
-Unsloth (checkpointed and auto-resuming, to Google Drive by default), merge
-to bf16, GGUF export, and optional Hugging Face upload.
+it to Google Colab, optionally adjust the CONFIGURATION cell, and
+`Runtime → Run all`. It performs the entire pipeline — environment checks,
+dependency install, dataset download and Hermes-format conversion, the
+mask-verification gate, LoRA SFT with Unsloth (checkpointed, auto-resuming),
+merge, GGUF export, and optional Hugging Face upload.
+
+**Primary target: the Colab Pro G4 instance** (RTX PRO 6000, 96GB VRAM /
+180GB RAM / ~200GB disk) — the defaults (27B bf16 LoRA at 16K, checkpoints
+on local VM disk, no Google Drive) run as-is there. An auto-adjust cell
+detects weaker runtimes and downshifts safely: A100-40GB-class → QLoRA +
+seq 8192; free-tier T4 → hard-stops for models over ~9B with a clear
+message, otherwise 4-bit + fp16 + seq 4096 + frequent checkpoints. Google
+Drive is opt-in (`USE_DRIVE = True`) and only ever receives checkpoints and
+the adapter, with retention auto-sized to the account's actual free space —
+a 15GB Drive is fine; the merged model and GGUFs never touch Drive.
 
 ## Do not edit the notebook directly
 
@@ -26,10 +35,9 @@ configuration knob is used but no longer defined.
 
 ## What the notebook assumes
 
-- A Colab GPU runtime with ~96GB VRAM / ~180GB RAM / ~200GB disk. On less
-  VRAM, set `LOAD_IN_4BIT = True` (QLoRA fallback).
 - `MODEL_ID = "Qwen/Qwen3.6-27B"` — verify the exact repo id on hf.co
-  before the run.
+  before the run. On sub-20GB GPUs a ~4–8B `MODEL_ID` (+ matching
+  `MODEL_SIZE_B`) is required; the notebook enforces this.
 - Data is downloaded from public, non-gated Hugging Face datasets and
   converted defensively (per-source yield reported, licenses recorded in
   `data/manifest.json`). A `personal.jsonl` uploaded to `/content/data/`
