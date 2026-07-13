@@ -128,13 +128,15 @@ async fn resolve_peer(cfg: &GatewayConfig, args: &Args) -> anyhow::Result<(IpAdd
     let found = discover_gateways(cfg.discovery_port, &code, Duration::from_secs(5)).await?;
     let gw = found.into_iter().next().context(
         "No desktop on this LAN.\n\
-         Common fixes:\n\
-         1) On the desktop dashboard, copy the EXACT pair code and use it here.\n\
-         2) Match passwords on both PCs (or clear password on both).\n\
-         3) Same Wi‑Fi, not Guest / client-isolation.\n\
-         4) Skip discovery — use the desktop IP directly:\n\
-            enet-agent --config config\\agent.toml --pair-code BMW-XXXX --peer 192.168.x.x\n\
-         (Find the desktop IP with: ipconfig   on the Host PC)",
+         If the desktop is on Ethernet and this laptop is on Wi‑Fi, broadcast discovery usually fails.\n\
+         Fix (recommended):\n\
+           1) On the desktop, open http://127.0.0.1:47901 and copy the pair code + LAN IP.\n\
+           2) Match passwords on both PCs (or clear password on both).\n\
+           3) On the laptop (Admin PowerShell):\n\
+              Stop-Process -Name enet-agent -Force -ErrorAction SilentlyContinue\n\
+              cd C:\\BMW-ENET\\Client\n\
+              .\\enet-agent.exe --config config\\agent.toml --pair-code BMW-XXXX --peer DESKTOP_LAN_IP\n\
+         Also check: same router (not Guest / client-isolation), Windows Firewall allows UDP 47900/47902.",
     )?;
     if gw.password_required && cfg.password.is_empty() {
         eprintln!(
@@ -194,6 +196,14 @@ async fn main() -> anyhow::Result<()> {
         cfg.network_mode = NetworkMode::Relay;
         cfg.relay_url = relay.clone();
         cfg.apply_remote_defaults();
+    }
+    // Persist --peer / --pair-code so scheduled Client restarts keep working across Wi‑Fi↔LAN.
+    if args.peer.is_some() || args.pair_code.is_some() {
+        if let Err(e) = cfg.save(&args.config) {
+            eprintln!("warning: could not save config: {e}");
+        } else {
+            eprintln!("Saved peer/pair settings to {}", args.config.display());
+        }
     }
 
     let _guard = init_logging(cfg.log_level, &cfg.log_dir)?;

@@ -129,6 +129,10 @@ struct StatusResponse {
     network_mode_label: String,
     is_remote: bool,
     relay_url: String,
+    /// This PC's LAN IPv4 addresses (for Wi‑Fi laptop → wired desktop connect).
+    lan_ips: Vec<String>,
+    /// Ready-to-run laptop command when auto-discovery fails.
+    connect_command: String,
 }
 
 #[derive(Deserialize)]
@@ -176,7 +180,8 @@ async fn main() -> anyhow::Result<()> {
             eprintln!("  Relay:      {}", cfg.relay_url);
             eprintln!("  Laptop must use the same relay + pair code.");
         } else {
-            eprintln!("  Laptop: install Agent → auto-finds this PC on the LAN.");
+            eprintln!("  Laptop: same Wi‑Fi OR Wi‑Fi laptop + wired desktop:");
+            eprintln!("    enet-agent --peer <this-PC-LAN-IP> --pair-code {pair_code}");
         }
         eprintln!();
         for hint in cfg.setup_hints() {
@@ -478,6 +483,31 @@ async fn api_status(State(state): State<AppState>) -> Json<StatusResponse> {
             " You are on a remote path (relay/VPN). Expect higher latency than LAN.",
         );
     }
+    let lan_ips = local_lan_ipv4s();
+    let primary_ip = lan_ips
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "DESKTOP_IP".into());
+    let connect_command = format!(
+        ".\\enet-agent.exe --config config\\agent.toml --pair-code {} --peer {}",
+        cfg.pair_code, primary_ip
+    );
+    let mut setup_hints = cfg.setup_hints();
+    if !cfg.network_mode.is_remote()
+        && !gateway_state.laptop_connected
+        && !matches!(gateway_state.connection, ConnectionState::Connected)
+    {
+        setup_hints.push(format!(
+            "Wi‑Fi laptop + wired desktop? Auto-discover often fails. On the laptop run: {connect_command}"
+        ));
+        if lan_ips.len() > 1 {
+            setup_hints.push(format!("This PC LAN IPs: {}", lan_ips.join(", ")));
+        }
+        setup_hints.push(
+            "Also match passwords on both PCs (or clear password on both), and use the exact pair code above."
+                .into(),
+        );
+    }
     Json(StatusResponse {
         state: gateway_state,
         stats,
@@ -486,14 +516,37 @@ async fn api_status(State(state): State<AppState>) -> Json<StatusResponse> {
         memory_total,
         flash_safety,
         pair_code: cfg.pair_code.clone(),
-        setup_hints: cfg.setup_hints(),
+        setup_hints,
         setup_complete: cfg.setup_complete,
         friendly_status: friendly,
         network_mode: format!("{:?}", cfg.network_mode).to_lowercase(),
         network_mode_label: cfg.network_mode.label().into(),
         is_remote: cfg.network_mode.is_remote(),
         relay_url: cfg.relay_url.clone(),
+        lan_ips,
+        connect_command,
     })
+}
+
+/// Best-effort local IPv4 list for “connect with --peer” hints.
+fn local_lan_ipv4s() -> Vec<String> {
+    let mut ips = Vec::new();
+    // Primary outbound address.
+    if let Ok(sock) = std::net::UdpSocket::bind("0.0.0.0:0") {
+        if sock.connect("8.8.8.8:80").is_ok() {
+            if let Ok(local) = sock.local_addr() {
+                if let IpAddr::V4(v4) = local.ip() {
+                    if !v4.is_loopback() {
+                        ips.push(v4.to_string());
+                    }
+                }
+            }
+        }
+    }
+    // Extra NICs from sysinfo names aren't enough for IPs; keep primary for now.
+    ips.sort();
+    ips.dedup();
+    ips
 }
 
 async fn api_start(State(state): State<AppState>) -> Json<serde_json::Value> {

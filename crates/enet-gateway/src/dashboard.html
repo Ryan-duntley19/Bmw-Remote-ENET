@@ -125,6 +125,28 @@
     padding: 0.75rem 0.9rem;
   }
   .hints ol { margin: 0.35rem 0 0 1.1rem; color: var(--muted); padding: 0; }
+  .peer-box {
+    margin-top: 0.9rem;
+    padding: 0.75rem 0.9rem;
+    background: #121a1f;
+    border: 1px solid var(--accent-dim);
+    border-radius: 10px;
+    font-size: 0.9rem;
+  }
+  .peer-box .title { color: var(--accent); font-weight: 650; margin-bottom: 0.35rem; }
+  .peer-box .muted { color: var(--muted); margin: 0.25rem 0 0.55rem; }
+  .peer-box code {
+    display: block;
+    background: #0c1014;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.65rem 0.75rem;
+    font-family: Consolas, "Cascadia Mono", monospace;
+    font-size: 0.78rem;
+    word-break: break-all;
+    white-space: pre-wrap;
+  }
+  .peer-box .ips { color: var(--muted); font-size: 0.82rem; margin-top: 0.45rem; }
   .log-panel {
     display: flex;
     flex-direction: column;
@@ -263,6 +285,16 @@
         <strong>Flash safety:</strong> <span id="safety-txt">checking…</span>
       </div>
 
+      <div class="peer-box" id="peer-box" style="display:none">
+        <div class="title">Laptop on Wi‑Fi, desktop on Ethernet?</div>
+        <p class="muted">Auto-discover often fails across Wi‑Fi ↔ wired. On the laptop PowerShell (as Admin), stop the agent and run this with the exact pair code:</p>
+        <code id="peer-cmd">—</code>
+        <div class="ips" id="peer-ips"></div>
+        <div class="actions" style="margin-top:0.65rem">
+          <button class="primary" onclick="copyPeerCmd()">Copy command</button>
+        </div>
+      </div>
+
       <div class="hints" id="hints-box">
         <strong>Get connected</strong>
         <ol id="hints"></ol>
@@ -371,9 +403,23 @@ function renderStatus(s) {
   const lap = !!(s.state && (s.state.laptop_connected || (s.state.connection === 'connected')));
   const peer = (s.state && s.state.peer_endpoint) || '';
   setBadge(document.getElementById('lap-badge'), lap ? 'CONNECTED' : 'WAITING', lap ? 'ok' : 'off');
+  const lanIps = s.lan_ips || [];
   document.getElementById('lap-detail').textContent = lap
     ? ((s.network_mode_label || 'LAN') + (peer ? (' · ' + peer) : ''))
-    : 'Open Agent on the laptop and use this pair code';
+    : (lanIps.length
+      ? ('Waiting · desktop LAN IP ' + lanIps[0] + ' — use --peer on Wi‑Fi laptop')
+      : 'Open Agent on the laptop and use this pair code');
+
+  const peerBox = document.getElementById('peer-box');
+  if (!lap && s.connect_command) {
+    peerBox.style.display = 'block';
+    document.getElementById('peer-cmd').textContent = s.connect_command;
+    document.getElementById('peer-ips').textContent = lanIps.length
+      ? ('This PC LAN IP(s): ' + lanIps.join(', '))
+      : 'Find this PC IP with ipconfig (Ethernet adapter).';
+  } else {
+    peerBox.style.display = 'none';
+  }
 
   const link = lap && !!(s.state && s.state.vehicle && s.state.vehicle.link_up);
   const vip = (s.state && s.state.vehicle && s.state.vehicle.discovered_ip) || '';
@@ -409,10 +455,22 @@ function renderStatus(s) {
 
   const hints = s.setup_hints || [];
   document.getElementById('hints').innerHTML = hints.map(h => '<li>' + escapeHtml(h) + '</li>').join('');
-  document.getElementById('hints-box').style.display = (s.setup_complete || hints.length === 0) ? 'none' : 'block';
+  // Keep hints visible while waiting for the laptop (Wi‑Fi↔LAN guidance).
+  document.getElementById('hints-box').style.display =
+    (hints.length === 0 || (s.setup_complete && lap)) ? 'none' : 'block';
 
   document.getElementById('footer-left').textContent = s.friendly_status || 'BMW ENET Gateway';
   document.getElementById('footer-right').textContent = 'v' + ((s.state && s.state.version) || '?');
+}
+
+async function copyPeerCmd() {
+  const t = document.getElementById('peer-cmd').textContent || '';
+  try {
+    await navigator.clipboard.writeText(t);
+    pushLocal('info', 'Copied laptop connect command');
+  } catch (e) {
+    pushLocal('warn', 'Copy failed — select the command manually');
+  }
 }
 
 async function refreshNow() {

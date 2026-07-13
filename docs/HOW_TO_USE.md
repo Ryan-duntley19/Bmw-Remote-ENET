@@ -38,7 +38,20 @@ Double-click the **BMW ENET Gateway** desktop shortcut, or run `enet-gui`.
 2. On the **laptop**, run Setup → **Client** and paste the code (or leave blank on the same Wi‑Fi).
 3. Leave `enet-agent` / the Client service running.
 
-Different networks: see [REMOTE.md](REMOTE.md).
+### Desktop on Ethernet, laptop on Wi‑Fi
+
+Same home router is fine, but **auto-discovery often fails** across Wi‑Fi ↔ wired. Use the Host dashboard’s **Copy command**, or on the laptop:
+
+```powershell
+Stop-Process -Name enet-agent -Force -ErrorAction SilentlyContinue
+cd C:\BMW-ENET\Client
+# Use the EXACT pair code + desktop Ethernet IPv4 from Host dashboard / ipconfig
+.\enet-agent.exe --config config\agent.toml --pair-code BMW-XXXX --peer 192.168.x.x
+```
+
+Also match passwords on both PCs (or clear `password` on both). Guest / AP-isolation Wi‑Fi will not work.
+
+Different networks (not the same router): see [REMOTE.md](REMOTE.md).
 
 ---
 
@@ -93,7 +106,8 @@ Never flash over flaky Wi‑Fi or a high-latency relay.
 |---------|----------|
 | Connection refused on `:47901` | Re-run `BMW-ENET-Setup.exe` → **Host** as Admin |
 | Only have a source ZIP | Download Setup from Releases (do not use the source ZIP alone) |
-| Laptop never connects | Same Wi‑Fi? Pair code correct? Client installed? |
+| Laptop never connects | Same router? Exact pair code? Passwords match? |
+| “No desktop on this LAN” (Wi‑Fi + wired) | Use `--peer <desktop LAN IP>` from Host dashboard / `ipconfig` |
 | Vehicle never awake | Reseat ENET, ignition ON, wait 10–20 seconds |
 | Setup: `VCRUNTIME140.dll` not found | Install [VC++ Redistributable x64](https://aka.ms/vs/17/release/vc_redist.x64.exe), or use Setup **v0.1.5+** |
 | ISTA cannot find the car | Wait until UI is fully green; use `169.254.1.1` on `BMW-ENET` |
