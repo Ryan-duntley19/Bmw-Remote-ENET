@@ -264,13 +264,14 @@ impl eframe::App for GatewayApp {
         });
 
         if self.help_open {
-            egui::Window::new("Setup help — do this once")
+            egui::Window::new("How to use — setup & daily workflow")
                 .collapsible(false)
                 .resizable(true)
-                .default_width(480.0)
+                .default_width(520.0)
                 .show(ctx, |ui| {
+                    ui.heading("First-time setup");
                     ui.label("You do not need to know networking. Follow these steps:");
-                    ui.add_space(8.0);
+                    ui.add_space(6.0);
                     if self.status.setup_hints.is_empty() {
                         ui.label("1. Keep this desktop on your home network.");
                         ui.label("2. Install/start the Gateway on this PC.");
@@ -293,6 +294,16 @@ impl eframe::App for GatewayApp {
                             .color(egui::Color32::from_rgb(0, 180, 200)),
                         );
                     }
+                    ui.add_space(10.0);
+                    ui.heading("Every time you use the car");
+                    ui.label("1. Gateway running (this PC) + Agent running (laptop).");
+                    ui.label("2. Plug ENET cable into car OBD + laptop.");
+                    ui.label("3. Ignition ON — wait for Vehicle awake (green).");
+                    ui.label("4. Open ISTA / E-Sys on this desktop.");
+                    ui.label("5. Flash only if Flash safety says SAFE.");
+                    ui.add_space(8.0);
+                    ui.label("Buttons: Start/Stop/Restart control the tunnel · Settings = port/password · Export Logs = troubleshooting.");
+                    ui.label("Full guide in the repo: docs/HOW_TO_USE.md");
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         if ui.button("I finished setup").clicked() {

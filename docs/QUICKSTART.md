@@ -45,3 +45,15 @@ enet-setup agent --wireguard --yes
 Or install Tailscale on both PCs and set the agent `peer_addr` to the desktop’s Tailscale IP.
 
 **Flash only when the dashboard says SAFE.** Prefer same-LAN or WireGuard for ECU programming.
+
+---
+
+## Using the GUI after install
+
+Full walkthrough: **[HOW_TO_USE.md](HOW_TO_USE.md)**
+
+1. Desktop: open **http://127.0.0.1:47901/** or the **BMW ENET Gateway** app (`enet-gui`).
+2. Copy the **pair code**.
+3. Laptop: run the agent with that code.
+4. Plug ENET + ignition ON → wait for green lights → open ISTA/E-Sys on the desktop.
+

@@ -1,55 +1,81 @@
 # User Manual
 
-## Easiest path
+## Start here
 
-Follow **[QUICKSTART.md](QUICKSTART.md)** — double-click installers, no IP typing.
+**How to use the GUI and work on the car day-to-day:**  
+→ **[HOW_TO_USE.md](HOW_TO_USE.md)**
 
-## What you see
+**First install (5 minutes):**  
+→ **[QUICKSTART.md](QUICKSTART.md)**
+
+**Laptop and desktop on different networks:**  
+→ **[REMOTE.md](REMOTE.md)**
+
+---
+
+## What you see in the UI
 
 ### Browser dashboard (`http://127.0.0.1:47901/`)
 
 - Large **pair code** for the laptop
 - Green/grey lights: Gateway / Laptop / Vehicle / Awake
+- Network mode (LAN / Relay / WireGuard)
 - Flash safety verdict
 - Step-by-step checklist
 
 ### Native GUI (`enet-gui`)
 
-Same status, plus Setup help, Settings, Export logs, Open in browser.
+Same status, plus:
 
-## Pairing
+- **Setup help** — first-run steps
+- **Settings** — port / password
+- **Start / Stop / Restart**
+- **Export logs**
+- **Open in browser**
 
-1. Desktop shows pair code `BMW-XXXX`.
-2. Laptop installer asks for it (or press Enter to auto-find).
-3. Agent discovers the desktop on UDP 47902 — **no desktop IP needed**.
+---
 
-## Daily use
+## Pairing (summary)
 
-1. Services auto-start after install.
-2. Plug ENET → ignition ON.
-3. Wait for Laptop + Vehicle lights.
-4. Open ISTA/E-Sys on the desktop.
-5. Flash only when safety says OK.
+1. Desktop UI shows pair code `BMW-XXXX`.
+2. Laptop agent uses that code (or auto-finds on the same LAN).
+3. No desktop IP typing needed on the same network.
 
-## Commands worth knowing
+---
+
+## Daily use (summary)
+
+1. Gateway + agent running.  
+2. Plug ENET → ignition ON.  
+3. Wait for Laptop + Vehicle lights.  
+4. Open ISTA/E-Sys on the desktop.  
+5. Flash only when safety says **SAFE**.
+
+---
+
+## Commands
 
 ```bash
+enet-gateway              # desktop service + dashboard
+enet-gui                  # native GUI
+enet-agent                # laptop
 enet-setup gateway --yes
 enet-setup agent
 enet-setup find
-enet-setup doctor --role agent
-enet-agent --pair-code BMW-XXXX
+enet-setup doctor --role gateway
 ```
+
+---
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---------|-----|
-| API / dashboard unreachable | Start gateway / Install-Desktop.bat |
-| Laptop cannot find desktop | Same Wi‑Fi; pair code; private network profile; UDP 47902 allowed |
+| GUI / dashboard unreachable | Start gateway / `Install-Desktop.bat` |
+| Laptop cannot find desktop | Same Wi‑Fi; pair code; or use relay — [REMOTE.md](REMOTE.md) |
 | Vehicle never awake | Cable, ignition, wait after plug-in |
-| ISTA cannot see car | Tunnel Connected first; tester IP `169.254.1.1` on virtual NIC |
+| ISTA cannot see car | UI fully green first; tester IP `169.254.1.1` on virtual NIC |
 
 ## Safety
 
-Never flash when the UI warns. This gateway never modifies vehicle data by itself.
+This software never modifies vehicle data by itself. Do not flash when the UI warns.
