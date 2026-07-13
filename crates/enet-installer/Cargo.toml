@@ -10,6 +10,11 @@ publish = false
 name = "BMW-ENET-Setup"
 path = "src/main.rs"
 
+[features]
+default = []
+# Bake Host/Client zip packages into BMW-ENET-Setup.exe (required for private repos).
+embed = []
+
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }

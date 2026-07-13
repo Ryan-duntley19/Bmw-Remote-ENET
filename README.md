@@ -8,11 +8,12 @@ Works on the **same Wi-Fi** *or* on **different networks** (relay / WireGuard).
 
 **No Rust. No .bat files.** Download the wizard and choose Host or Client:
 
-1. Get **`BMW-ENET-Setup.exe`** from [Releases](https://github.com/Ryan-duntley19/test/releases)  
-   (or the GitHub Actions artifact `BMW-ENET-Windows-Installer`)
-2. Double-click it → approve Administrator
-3. Pick **Host (Desktop)** or **Client (Laptop)** → **Install**
-4. Host opens **http://127.0.0.1:47901/** with your pair code  
+1. While **logged into GitHub**, open [Releases](https://github.com/Ryan-duntley19/test/releases)  
+   (repo is private — you must be signed in)
+2. Download **`BMW-ENET-Setup.exe`** (v0.1.1+ has packages built in — no online download needed)
+3. Double-click it → approve Administrator
+4. Pick **Host (Desktop)** or **Client (Laptop)** → **Install**
+5. Host opens **http://127.0.0.1:47901/** with your pair code  
    Client: enter that pair code (or leave blank on the same Wi-Fi)
 
 Full wizard guide: **[docs/SETUP_WIZARD.md](docs/SETUP_WIZARD.md)**

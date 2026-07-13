@@ -7,3 +7,4 @@ logs/
 Cargo.lock.bak
 .DS_Store
 installer/*.exe
+crates/enet-installer/embedded/*.zip

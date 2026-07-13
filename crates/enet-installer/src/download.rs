@@ -1,9 +1,11 @@
-//! Download BMW ENET packages from GitHub Releases (or use local offline files).
+//! Resolve Host/Client packages: embedded (preferred) → local zip → GitHub.
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
+#[cfg(feature = "embed")]
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 /// Default GitHub repository that publishes Windows packages.
@@ -100,7 +102,20 @@ pub struct PreparedPackage {
     pub extract_dir: PathBuf,
 }
 
-/// Resolve package files: prefer offline files next to the Setup.exe, else download.
+/// True when this Setup.exe was built with Host/Client packages baked in.
+pub fn has_embedded_packages() -> bool {
+    cfg!(feature = "embed")
+}
+
+#[cfg(feature = "embed")]
+fn embedded_zip(role: Role) -> &'static [u8] {
+    match role {
+        Role::Host => include_bytes!("../embedded/BMW-ENET-Host-windows-x64.zip"),
+        Role::Client => include_bytes!("../embedded/BMW-ENET-Client-windows-x64.zip"),
+    }
+}
+
+/// Resolve package files: embedded → offline beside Setup.exe → GitHub Releases.
 pub fn prepare_package(
     role: Role,
     repo: &str,
@@ -109,16 +124,39 @@ pub fn prepare_package(
     progress: &ProgressFn,
 ) -> Result<PreparedPackage> {
     fs::create_dir_all(work_dir)?;
+    let extract_dir = work_dir.join("extract");
+    if extract_dir.exists() {
+        let _ = fs::remove_dir_all(&extract_dir);
+    }
+    fs::create_dir_all(&extract_dir)?;
 
-    // 1) Offline: zip next to Setup.exe
+    // 1) Embedded packages (self-contained Setup.exe — works on private repos / offline)
+    #[cfg(feature = "embed")]
+    {
+        let data = embedded_zip(role);
+        if !data.is_empty() {
+            progress(
+                0,
+                data.len() as u64,
+                &format!(
+                    "Using built-in {} package ({:.1} MB)...",
+                    role.label(),
+                    data.len() as f64 / 1_048_576.0
+                ),
+            );
+            unzip_reader(Cursor::new(data), &extract_dir, progress)?;
+            verify_bins(role, &extract_dir)?;
+            return Ok(PreparedPackage {
+                version: "embedded".into(),
+                extract_dir,
+            });
+        }
+    }
+
+    // 2) Offline: zip next to Setup.exe
     let local_zip = setup_dir.join(role.asset_name());
     if local_zip.is_file() {
         progress(0, 0, &format!("Using offline package {}", local_zip.display()));
-        let extract_dir = work_dir.join("extract");
-        if extract_dir.exists() {
-            let _ = fs::remove_dir_all(&extract_dir);
-        }
-        fs::create_dir_all(&extract_dir)?;
         unzip_to(&local_zip, &extract_dir, progress)?;
         verify_bins(role, &extract_dir)?;
         return Ok(PreparedPackage {
@@ -127,18 +165,13 @@ pub fn prepare_package(
         });
     }
 
-    // 2) Offline: binaries already next to Setup.exe (dev / copied build)
+    // 3) Offline: binaries already next to Setup.exe (dev / copied build)
     if role
         .required_bins()
         .iter()
         .all(|b| setup_dir.join(b).is_file())
     {
         progress(0, 0, "Using binaries next to Setup.exe");
-        let extract_dir = work_dir.join("extract");
-        if extract_dir.exists() {
-            let _ = fs::remove_dir_all(&extract_dir);
-        }
-        fs::create_dir_all(&extract_dir)?;
         for bin in role.required_bins().iter().chain(role.optional_bins().iter()) {
             let src = setup_dir.join(bin);
             if src.is_file() {
@@ -151,7 +184,7 @@ pub fn prepare_package(
         });
     }
 
-    // 3) Download from GitHub Releases
+    // 4) Download from GitHub Releases (public repos only — private repos return 404)
     progress(0, 0, "Looking up latest GitHub release...");
     let client = reqwest::blocking::Client::builder()
         .user_agent("BMW-ENET-Setup")
@@ -159,15 +192,27 @@ pub fn prepare_package(
         .build()?;
 
     let api = format!("https://api.github.com/repos/{repo}/releases/latest");
-    let release: Release = client
+    let resp = client
         .get(&api)
         .header("Accept", "application/vnd.github+json")
         .send()
-        .with_context(|| format!("Failed to query {api}"))?
+        .with_context(|| format!("Failed to query {api}"))?;
+
+    if resp.status().as_u16() == 404 {
+        bail!(
+            "Cannot download packages from GitHub (404). This usually means the repository is private, \
+so anonymous download is blocked.\n\n\
+Fix (pick one):\n\
+  1. Download BMW-ENET-Windows-Installer.zip while logged into GitHub, extract it, and keep \
+BMW-ENET-Setup.exe next to the Host/Client zip files, then run Setup again.\n\
+  2. Use a newer BMW-ENET-Setup.exe that has the packages built in (from the latest Release / Actions artifact).\n\
+  3. Make the GitHub repository public if you want online download to work."
+        );
+    }
+
+    let release: Release = resp
         .error_for_status()
-        .context(
-            "No GitHub release found yet. Publish a Windows release, or place the role zip next to BMW-ENET-Setup.exe",
-        )?
+        .context("GitHub Releases request failed")?
         .json()
         .context("Invalid GitHub release JSON")?;
 
@@ -200,12 +245,6 @@ pub fn prepare_package(
         ),
     );
     download_file(&client, &asset.browser_download_url, &zip_path, asset.size, progress)?;
-
-    let extract_dir = work_dir.join("extract");
-    if extract_dir.exists() {
-        let _ = fs::remove_dir_all(&extract_dir);
-    }
-    fs::create_dir_all(&extract_dir)?;
     unzip_to(&zip_path, &extract_dir, progress)?;
     verify_bins(role, &extract_dir)?;
 
@@ -246,9 +285,13 @@ fn download_file(
 }
 
 fn unzip_to(zip_path: &Path, dest: &Path, progress: &ProgressFn) -> Result<()> {
-    progress(0, 0, "Extracting package...");
     let file = File::open(zip_path)?;
-    let mut archive = zip::ZipArchive::new(file)?;
+    unzip_reader(file, dest, progress)
+}
+
+fn unzip_reader<R: Read + io::Seek>(reader: R, dest: &Path, progress: &ProgressFn) -> Result<()> {
+    progress(0, 0, "Extracting package...");
+    let mut archive = zip::ZipArchive::new(reader)?;
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
         let name = file
@@ -266,7 +309,6 @@ fn unzip_to(zip_path: &Path, dest: &Path, progress: &ProgressFn) -> Result<()> {
         let mut outfile = File::create(&out)?;
         io::copy(&mut file, &mut outfile)?;
     }
-    // If zip contained a single top-level folder, flatten when bins are nested.
     flatten_if_needed(dest)?;
     Ok(())
 }

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Build Windows .exe binaries and copy them into installer\ for Install-*.bat.
+  Build Windows .exe binaries, Host/Client zips, and self-contained BMW-ENET-Setup.exe.
 
 .DESCRIPTION
   Requires Rust (https://rustup.rs). First build can take several minutes.
@@ -46,14 +46,36 @@ if ($LASTEXITCODE -ne 0) {
   exit $LASTEXITCODE
 }
 
-Write-Host "Building setup wizard (BMW-ENET-Setup.exe)..."
-& cargo build --release -p enet-installer
+$releaseDir = Join-Path $repoRoot "target\release"
+$embedDir = Join-Path $repoRoot "crates\enet-installer\embedded"
+New-Item -ItemType Directory -Force -Path $embedDir | Out-Null
+
+$hostDir = Join-Path $here "_host_pkg"
+$clientDir = Join-Path $here "_client_pkg"
+New-Item -ItemType Directory -Force -Path $hostDir | Out-Null
+New-Item -ItemType Directory -Force -Path $clientDir | Out-Null
+Copy-Item -Force (Join-Path $releaseDir "enet-gateway.exe") $hostDir -ErrorAction SilentlyContinue
+Copy-Item -Force (Join-Path $releaseDir "enet-setup.exe") $hostDir -ErrorAction SilentlyContinue
+Copy-Item -Force (Join-Path $releaseDir "enet-gui.exe") $hostDir -ErrorAction SilentlyContinue
+Copy-Item -Force (Join-Path $releaseDir "enet-agent.exe") $clientDir -ErrorAction SilentlyContinue
+Copy-Item -Force (Join-Path $releaseDir "enet-setup.exe") $clientDir -ErrorAction SilentlyContinue
+
+$hostZip = Join-Path $here "BMW-ENET-Host-windows-x64.zip"
+$clientZip = Join-Path $here "BMW-ENET-Client-windows-x64.zip"
+Compress-Archive -Path "$hostDir\*" -DestinationPath $hostZip -Force
+Compress-Archive -Path "$clientDir\*" -DestinationPath $clientZip -Force
+Copy-Item -Force $hostZip (Join-Path $embedDir "BMW-ENET-Host-windows-x64.zip")
+Copy-Item -Force $clientZip (Join-Path $embedDir "BMW-ENET-Client-windows-x64.zip")
+Remove-Item -Recurse -Force $hostDir, $clientDir -ErrorAction SilentlyContinue
+Write-Host "  OK  Host/Client packages staged for embed"
+
+Write-Host "Building self-contained setup wizard (BMW-ENET-Setup.exe)..."
+& cargo build --release -p enet-installer --features embed
 if ($LASTEXITCODE -ne 0) {
   Write-Host "Installer build failed." -ForegroundColor Red
   exit $LASTEXITCODE
 }
 
-$releaseDir = Join-Path $repoRoot "target\release"
 $bins = @("enet-setup.exe", "enet-gateway.exe", "enet-agent.exe", "enet-relay.exe", "BMW-ENET-Setup.exe")
 if (-not $SkipGui) { $bins += "enet-gui.exe" }
 
@@ -69,27 +91,10 @@ foreach ($bin in $bins) {
   }
 }
 
-# Offline packages the wizard can use without GitHub
-$hostDir = Join-Path $here "_host_pkg"
-$clientDir = Join-Path $here "_client_pkg"
-New-Item -ItemType Directory -Force -Path $hostDir | Out-Null
-New-Item -ItemType Directory -Force -Path $clientDir | Out-Null
-Copy-Item -Force (Join-Path $releaseDir "enet-gateway.exe") $hostDir -ErrorAction SilentlyContinue
-Copy-Item -Force (Join-Path $releaseDir "enet-setup.exe") $hostDir -ErrorAction SilentlyContinue
-Copy-Item -Force (Join-Path $releaseDir "enet-gui.exe") $hostDir -ErrorAction SilentlyContinue
-Copy-Item -Force (Join-Path $releaseDir "enet-agent.exe") $clientDir -ErrorAction SilentlyContinue
-Copy-Item -Force (Join-Path $releaseDir "enet-setup.exe") $clientDir -ErrorAction SilentlyContinue
-if (Get-Command Compress-Archive -ErrorAction SilentlyContinue) {
-  Compress-Archive -Path "$hostDir\*" -DestinationPath (Join-Path $here "BMW-ENET-Host-windows-x64.zip") -Force
-  Compress-Archive -Path "$clientDir\*" -DestinationPath (Join-Path $here "BMW-ENET-Client-windows-x64.zip") -Force
-  Write-Host "  OK  BMW-ENET-Host-windows-x64.zip / BMW-ENET-Client-windows-x64.zip"
-}
-Remove-Item -Recurse -Force $hostDir, $clientDir -ErrorAction SilentlyContinue
-
 Write-Host ""
 Write-Host "Build complete." -ForegroundColor Green
 Write-Host "End users: double-click BMW-ENET-Setup.exe and choose Host or Client."
-Write-Host "Legacy: Install-Desktop.bat / Install-Laptop.bat still work after this build."
+Write-Host "This Setup.exe has packages built in (works offline / private GitHub repos)."
 Write-Host ""
 
 if ($InstallDesktop) {

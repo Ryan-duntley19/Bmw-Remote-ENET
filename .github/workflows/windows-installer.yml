@@ -1,10 +1,10 @@
 # Build and publish the Windows setup wizard + Host/Client packages.
 #
 # Artifacts:
-#   BMW-ENET-Setup.exe                  — single wizard (Host or Client)
+#   BMW-ENET-Setup.exe                  — self-contained wizard (Host/Client packages embedded)
 #   BMW-ENET-Host-windows-x64.zip       — desktop package
 #   BMW-ENET-Client-windows-x64.zip     — laptop package
-#   BMW-ENET-Windows-Installer.zip      — Setup.exe + both zips (offline-friendly)
+#   BMW-ENET-Windows-Installer.zip      — Setup.exe + both zips
 
 name: Windows installer
 
@@ -26,43 +26,43 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build release binaries
+      - name: Build role binaries
         run: |
           cargo build --release `
             -p enet-setup `
             -p enet-gateway `
             -p enet-agent `
             -p enet-gui `
-            -p enet-relay `
-            -p enet-installer
+            -p enet-relay
 
-      - name: Stage Host package
+      - name: Stage Host and Client packages
         shell: pwsh
         run: |
-          $hostDir = "dist/host"
-          New-Item -ItemType Directory -Force -Path $hostDir | Out-Null
-          Copy-Item target/release/enet-gateway.exe $hostDir/
-          Copy-Item target/release/enet-setup.exe $hostDir/
-          Copy-Item target/release/enet-gui.exe $hostDir/
-          if (Test-Path config) { Copy-Item -Recurse config $hostDir/config }
-          Compress-Archive -Path "$hostDir/*" -DestinationPath dist/BMW-ENET-Host-windows-x64.zip -Force
+          New-Item -ItemType Directory -Force -Path dist/host, dist/client, crates/enet-installer/embedded | Out-Null
 
-      - name: Stage Client package
+          Copy-Item target/release/enet-gateway.exe dist/host/
+          Copy-Item target/release/enet-setup.exe dist/host/
+          Copy-Item target/release/enet-gui.exe dist/host/
+          if (Test-Path config) { Copy-Item -Recurse config dist/host/config }
+
+          Copy-Item target/release/enet-agent.exe dist/client/
+          Copy-Item target/release/enet-setup.exe dist/client/
+          if (Test-Path config) { Copy-Item -Recurse config dist/client/config }
+
+          Compress-Archive -Path "dist/host/*" -DestinationPath dist/BMW-ENET-Host-windows-x64.zip -Force
+          Compress-Archive -Path "dist/client/*" -DestinationPath dist/BMW-ENET-Client-windows-x64.zip -Force
+
+          # Bake packages into Setup.exe (required for private GitHub repos)
+          Copy-Item dist/BMW-ENET-Host-windows-x64.zip crates/enet-installer/embedded/ -Force
+          Copy-Item dist/BMW-ENET-Client-windows-x64.zip crates/enet-installer/embedded/ -Force
+
+      - name: Build self-contained Setup wizard
+        run: cargo build --release -p enet-installer --features embed
+
+      - name: Stage release files
         shell: pwsh
         run: |
-          $clientDir = "dist/client"
-          New-Item -ItemType Directory -Force -Path $clientDir | Out-Null
-          Copy-Item target/release/enet-agent.exe $clientDir/
-          Copy-Item target/release/enet-setup.exe $clientDir/
-          if (Test-Path config) { Copy-Item -Recurse config $clientDir/config }
-          Compress-Archive -Path "$clientDir/*" -DestinationPath dist/BMW-ENET-Client-windows-x64.zip -Force
-
-      - name: Stage Setup wizard
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item target/release/BMW-ENET-Setup.exe dist/BMW-ENET-Setup.exe
-          # Offline bundle: wizard + both role packages in one zip
+          Copy-Item target/release/BMW-ENET-Setup.exe dist/BMW-ENET-Setup.exe -Force
           Compress-Archive -Path @(
             "dist/BMW-ENET-Setup.exe",
             "dist/BMW-ENET-Host-windows-x64.zip",

@@ -192,13 +192,21 @@ impl eframe::App for SetupApp {
 
             match self.step {
                 Step::Welcome => {
-                    ui.label("This wizard downloads the correct Windows package for you.");
+                    ui.label("This wizard installs either the Host or the Client on this PC.");
                     ui.label("You do not need Rust, Git, or .bat scripts.");
+                    ui.add_space(8.0);
+                    if download::has_embedded_packages() {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(40, 140, 80),
+                            "This Setup.exe includes the Host and Client packages (works offline / private repos).",
+                        );
+                    } else {
+                        ui.label("Packages will be loaded from files next to this Setup.exe, or downloaded if the repo is public.");
+                    }
                     ui.add_space(8.0);
                     ui.label("Requirements:");
                     ui.label("• Windows 10/11 x64");
                     ui.label("• Administrator approval (UAC)");
-                    ui.label("• Internet access once (to download the Host or Client package)");
                     ui.add_space(16.0);
                     if ui.button("Continue").clicked() {
                         self.step = Step::ChooseRole;
@@ -332,8 +340,9 @@ impl eframe::App for SetupApp {
                     ui.add_space(8.0);
                     ui.label("Tips:");
                     ui.label("• Run as Administrator");
-                    ui.label("• Check internet access, or place the Host/Client zip next to this Setup.exe");
-                    ui.label("• Confirm a Windows release exists on GitHub with the package assets");
+                    ui.label("• Prefer the Setup.exe from the latest Release (packages are built in)");
+                    ui.label("• Or extract BMW-ENET-Windows-Installer.zip and keep the role zip next to Setup.exe");
+                    ui.label("• Private GitHub repos cannot be downloaded anonymously");
                     ui.add_space(16.0);
                     ui.horizontal(|ui| {
                         if ui.button("Back").clicked() {

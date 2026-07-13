@@ -4,9 +4,12 @@ Download **one file** and install either the Host or the Client.
 
 ## Download
 
-1. Open the repo **Releases** page (or the latest GitHub Actions artifact named `BMW-ENET-Windows-Installer`).
-2. Download **`BMW-ENET-Setup.exe`**  
-   (or **`BMW-ENET-Windows-Installer.zip`** which also includes the Host/Client packages for offline use).
+1. Open the repo **Releases** page while **logged into GitHub**  
+   (this repository is private — anonymous download links do not work):  
+   https://github.com/Ryan-duntley19/test/releases
+2. Download **`BMW-ENET-Setup.exe`**
+
+Prefer the newest release (`v0.1.1+`). Those builds have the Host/Client packages **built into** Setup.exe, so install works offline and does not call the GitHub API.
 
 ## Install
 
@@ -14,22 +17,24 @@ Download **one file** and install either the Host or the Client.
 2. Choose:
    - **Host (Desktop)** — PC that runs ISTA / E-Sys
    - **Client (Laptop)** — PC with the ENET cable at the car
-3. Click **Install**. The wizard downloads the matching package automatically.
+3. Click **Install**.
 4. Host: browser opens to **http://127.0.0.1:47901/** — copy the pair code.  
    Client: paste that pair code (or leave blank to auto-find on the same Wi-Fi).
 
 You do **not** need to install Rust or run any `.bat` scripts.
 
-## Offline install
+## If you see “No GitHub release found” / 404
 
-If the PC has no internet:
+Your Setup.exe is an older build that tried to download packages from GitHub. Private repos block that.
 
-1. Download `BMW-ENET-Windows-Installer.zip` on another machine.
+**Fix:** download a newer `BMW-ENET-Setup.exe` from Releases (packages embedded), **or**:
+
+1. Download `BMW-ENET-Windows-Installer.zip` (while logged in).
 2. Extract so these sit in the **same folder**:
    - `BMW-ENET-Setup.exe`
    - `BMW-ENET-Host-windows-x64.zip`
    - `BMW-ENET-Client-windows-x64.zip`
-3. Run `BMW-ENET-Setup.exe` — it uses the local zip for the role you pick.
+3. Run `BMW-ENET-Setup.exe` again.
 
 ## Uninstall
 
