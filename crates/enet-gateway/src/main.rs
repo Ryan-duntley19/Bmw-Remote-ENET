@@ -1,12 +1,10 @@
 //! Desktop ENET gateway — Windows service-compatible tunnel server + friendly dashboard.
 
 use anyhow::Context;
-use async_trait::async_trait;
 use axum::extract::State;
 use axum::response::Html;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use bytes::Bytes;
 use clap::Parser;
 use enet_core::config::{GatewayConfig, NetworkMode, Role};
 use enet_core::health::HealthMonitor;
@@ -33,7 +31,7 @@ struct Args {
     /// Path to gateway.toml
     #[arg(short, long, default_value = "config/gateway.toml")]
     config: PathBuf,
-    /// Use simulated TAP (no Wintun)
+    /// Force in-memory TAP (no Npcap / BMW-ENET) — for tests only
     #[arg(long)]
     simulate: bool,
     /// Run once and exit after N seconds (for tests)
@@ -47,24 +45,85 @@ struct Args {
     relay: Option<String>,
 }
 
-struct VirtualNic {
-    name: String,
-    inner: Arc<SimulatedEthernet>,
-}
+fn build_host_ethernet(cfg: &GatewayConfig, simulate: bool) -> anyhow::Result<Arc<dyn EthernetPort>> {
+    if simulate {
+        let (tap, _tool_peer) = SimulatedEthernet::pair(&cfg.virtual_interface, "tool-stack");
+        tap.set_link(true);
+        std::mem::forget(_tool_peer);
+        warn!("Host running in --simulate mode — ISTA cannot see the car");
+        return Ok(tap);
+    }
 
-#[async_trait]
-impl EthernetPort for VirtualNic {
-    fn name(&self) -> &str {
-        &self.name
+    #[cfg(windows)]
+    {
+        let fallback = || -> Arc<dyn EthernetPort> {
+            let (tap, _tool_peer) =
+                SimulatedEthernet::pair(&cfg.virtual_interface, "tool-stack");
+            tap.set_link(true);
+            std::mem::forget(_tool_peer);
+            tap
+        };
+
+        if !enet_tunnel::PcapEthernet::npcap_available() {
+            eprintln!();
+            eprintln!("  *** ISTA will NOT see the car yet ***");
+            eprintln!("  Install Npcap: https://npcap.com  (enable WinPcap API compatibility)");
+            eprintln!("  Re-run BMW-ENET-Setup (Host) to create BMW-ENET at {}", cfg.tester_ip);
+            eprintln!("  Tunnel stays up for connection testing; L2/ISTA path is inactive.");
+            eprintln!();
+            warn!("Npcap missing — Host L2 disabled");
+            return Ok(fallback());
+        }
+        let candidates = [
+            cfg.virtual_interface.as_str(),
+            "BMW-ENET",
+            "KM-TEST Loopback",
+            "Loopback",
+        ];
+        let mut last_err = None;
+        for want in candidates {
+            if want.is_empty() {
+                continue;
+            }
+            match enet_tunnel::PcapEthernet::open(want) {
+                Ok(port) => {
+                    info!(
+                        adapter = %port.name(),
+                        display = %port.display_name(),
+                        tester_ip = %cfg.tester_ip,
+                        "Host L2 port ready for ISTA"
+                    );
+                    eprintln!();
+                    eprintln!("  ISTA / E-Sys: select adapter “{}”", cfg.virtual_interface);
+                    eprintln!("  Tester IP on that adapter should be {}", cfg.tester_ip);
+                    eprintln!();
+                    return Ok(port);
+                }
+                Err(e) => last_err = Some(e),
+            }
+        }
+        eprintln!();
+        eprintln!("  *** BMW-ENET adapter not open — ISTA cannot see the car ***");
+        eprintln!(
+            "  Re-run BMW-ENET-Setup as Host (creates loopback BMW-ENET at {}).",
+            cfg.tester_ip
+        );
+        if let Some(e) = last_err {
+            eprintln!("  Detail: {e:#}");
+        }
+        eprintln!("  Tunnel stays up; fix the adapter then restart Host.");
+        eprintln!();
+        warn!("BMW-ENET pcap open failed — Host L2 disabled");
+        return Ok(fallback());
     }
-    async fn link_up(&self) -> bool {
-        self.inner.link_up().await
-    }
-    async fn recv(&self) -> anyhow::Result<Bytes> {
-        self.inner.recv().await
-    }
-    async fn send(&self, frame: Bytes) -> anyhow::Result<()> {
-        self.inner.send(frame).await
+
+    #[cfg(not(windows))]
+    {
+        let (tap, _tool_peer) = SimulatedEthernet::pair(&cfg.virtual_interface, "tool-stack");
+        tap.set_link(true);
+        std::mem::forget(_tool_peer);
+        warn!("non-Windows Host uses SimulatedEthernet — ISTA path is Windows-only");
+        Ok(tap)
     }
 }
 
@@ -201,14 +260,7 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    let (tap, _tool_peer) = SimulatedEthernet::pair(&cfg.virtual_interface, "tool-stack");
-    tap.set_link(true);
-    std::mem::forget(_tool_peer);
-
-    let eth: Arc<dyn EthernetPort> = Arc::new(VirtualNic {
-        name: cfg.virtual_interface.clone(),
-        inner: tap,
-    });
+    let eth: Arc<dyn EthernetPort> = build_host_ethernet(&cfg, args.simulate)?;
 
     let base_opts = TunnelOptions {
         bind: SocketAddr::from((

@@ -8,12 +8,16 @@
 
 mod engine;
 mod ethernet;
+#[cfg(windows)]
+mod pcap_ethernet;
 mod peer;
 mod relay_client;
 mod relay_engine;
 
 pub use engine::{TunnelEngine, TunnelHandle};
 pub use ethernet::{EthernetPort, LoopbackEthernet, SimulatedEthernet};
+#[cfg(windows)]
+pub use pcap_ethernet::PcapEthernet;
 pub use peer::PeerAddr;
 pub use relay_client::RelayRole;
 pub use relay_engine::{RelayTunnelEngine, RelayTunnelOptions};

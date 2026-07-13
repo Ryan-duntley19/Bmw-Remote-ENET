@@ -26,6 +26,20 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Npcap SDK (link wpcap for Host/Client L2)
+        shell: pwsh
+        run: |
+          $sdk = "https://npcap.com/dist/npcap-sdk-1.13.zip"
+          $zip = "$env:RUNNER_TEMP\npcap-sdk.zip"
+          $out = "$env:RUNNER_TEMP\npcap-sdk"
+          Invoke-WebRequest -Uri $sdk -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $out -Force
+          $lib = Join-Path $out "Lib\x64"
+          if (-not (Test-Path $lib)) { $lib = Join-Path $out "Lib" }
+          echo "LIB=$lib" >> $env:GITHUB_ENV
+          echo "NPCAP_LIB_DIR=$lib" >> $env:GITHUB_ENV
+          Get-ChildItem -Recurse $out | Select-Object -First 40 FullName
+
       - name: Build role binaries
         env:
           RUSTFLAGS: "-C target-feature=+crt-static"

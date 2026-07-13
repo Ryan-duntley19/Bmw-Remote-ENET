@@ -151,13 +151,15 @@ impl SetupApp {
                         }
                         if role == Role::Host {
                             summary.push_str(
-                                "\nNext: on the laptop, run this same Setup.exe and choose Client.\n",
+                                "\nNext: install Npcap (https://npcap.com, WinPcap mode) if prompted.\n\
+                                 In ISTA / E-Sys choose interface BMW-ENET (169.254.1.1).\n\
+                                 On the laptop, run Setup → Client, install Npcap, plug ENET, ignition ON.\n",
                             );
                         } else {
                             summary.push_str(
-                                "\nNext: open http://127.0.0.1:47903/ if Desktop is Waiting,\n\
-                                 enter the desktop LAN IP from http://127.0.0.1:47901/, click Connect.\n\
-                                 Then plug ENET into the car and turn ignition ON.\n",
+                                "\nNext: install Npcap on this laptop if prompted.\n\
+                                 Open http://127.0.0.1:47903/ — Desktop should go green (auto-find).\n\
+                                 Plug ENET into car + laptop, ignition ON, then open ISTA on the desktop.\n",
                             );
                         }
                         p.result_summary = summary;

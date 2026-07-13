@@ -127,6 +127,10 @@ pub fn run_install(
     #[cfg(windows)]
     {
         configure_firewall(req.role, &install_dir, progress)?;
+        ensure_npcap(req.role, progress);
+        if req.role == Role::Host {
+            setup_bmw_enet_adapter(progress)?;
+        }
         // Remove any broken SCM service from older Setup builds (error 87).
         remove_legacy_scm_service(req.role, progress);
         if req.start_service {
@@ -255,6 +259,130 @@ fn read_pair_code(path: &Path) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(windows)]
+fn npcap_installed() -> bool {
+    Path::new(r"C:\Windows\System32\Npcap\wpcap.dll").is_file()
+        || Path::new(r"C:\Windows\System32\wpcap.dll").is_file()
+        || Path::new(r"C:\Windows\SysWOW64\Npcap\wpcap.dll").is_file()
+}
+
+#[cfg(windows)]
+fn ensure_npcap(role: Role, progress: &ProgressFn) {
+    if npcap_installed() {
+        progress(0, 0, "Npcap found — L2 capture/inject available");
+        return;
+    }
+    progress(
+        0,
+        0,
+        "Npcap is REQUIRED for ISTA (car frames). Opening download page…",
+    );
+    let _ = Command::new("cmd")
+        .args(["/C", "start", "", "https://npcap.com/#download"])
+        .status();
+    let who = match role {
+        Role::Host => "desktop Host (ISTA adapter)",
+        Role::Client => "laptop Client (ENET cable)",
+    };
+    progress(
+        0,
+        0,
+        &format!(
+            "Install Npcap for the {who}, enable “WinPcap API-compatible Mode”, then re-run Setup or restart the app"
+        ),
+    );
+}
+
+/// Create Microsoft Loopback “BMW-ENET” at 169.254.1.1/16 for ISTA / E-Sys.
+#[cfg(windows)]
+fn setup_bmw_enet_adapter(progress: &ProgressFn) -> Result<()> {
+    progress(0, 0, "Configuring BMW-ENET virtual adapter for ISTA…");
+    let script = r#"
+$ErrorActionPreference = 'Stop'
+$name = 'BMW-ENET'
+$ip = '169.254.1.1'
+$prefix = 16
+
+function Configure-BmwEnet($adapter) {
+  Rename-NetAdapter -Name $adapter.Name -NewName $name -ErrorAction SilentlyContinue | Out-Null
+  $a = Get-NetAdapter -Name $name -ErrorAction SilentlyContinue
+  if (-not $a) { $a = $adapter }
+  Get-NetIPAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+    Where-Object { $_.IPAddress -ne $ip } |
+    Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue
+  $existing = Get-NetIPAddress -InterfaceIndex $a.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+    Where-Object { $_.IPAddress -eq $ip }
+  if (-not $existing) {
+    New-NetIPAddress -InterfaceIndex $a.ifIndex -IPAddress $ip -PrefixLength $prefix -AddressFamily IPv4 -ErrorAction SilentlyContinue | Out-Null
+  }
+  Set-NetIPInterface -InterfaceIndex $a.ifIndex -InterfaceMetric 50 -WeakHostSend Enabled -WeakHostReceive Enabled -ErrorAction SilentlyContinue | Out-Null
+  Disable-NetAdapterBinding -Name $name -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue | Out-Null
+  Write-Output "OK:$name"
+}
+
+$existing = Get-NetAdapter -Name $name -ErrorAction SilentlyContinue
+if ($existing) {
+  Configure-BmwEnet $existing
+  exit 0
+}
+
+# Prefer already-present KM-TEST loopback (rename it).
+$loop = Get-NetAdapter -ErrorAction SilentlyContinue |
+  Where-Object { $_.DriverDescription -match 'Loopback' -or $_.InterfaceDescription -match 'Loopback' } |
+  Select-Object -First 1
+if ($loop) {
+  Configure-BmwEnet $loop
+  exit 0
+}
+
+# Create a new Microsoft KM-TEST Loopback via LoopbackAdapter module (downloads DevCon).
+try {
+  if (-not (Get-Module -ListAvailable -Name LoopbackAdapter)) {
+    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -ErrorAction SilentlyContinue | Out-Null
+    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
+    Install-Module -Name LoopbackAdapter -Force -Scope AllUsers -AllowClobber -ErrorAction Stop
+  }
+  Import-Module LoopbackAdapter -Force
+  New-LoopbackAdapter -Name $name -Force | Out-Null
+  $a = Get-NetAdapter -Name $name -ErrorAction Stop
+  Configure-BmwEnet $a
+  exit 0
+} catch {
+  Write-Output ("ERR:" + $_.Exception.Message)
+  exit 2
+}
+"#;
+
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script])
+        .output()
+        .context("BMW-ENET adapter setup")?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.status.success() && stdout.contains("OK:") {
+        progress(
+            0,
+            0,
+            "BMW-ENET ready at 169.254.1.1 — select this adapter in ISTA / E-Sys",
+        );
+        Ok(())
+    } else {
+        progress(
+            0,
+            0,
+            "Could not auto-create BMW-ENET. Manual steps: Device Manager → Add legacy hardware → Network adapters → Microsoft KM-TEST Loopback Adapter → rename to BMW-ENET → set IP 169.254.1.1 / 255.255.0.0",
+        );
+        if !stdout.trim().is_empty() {
+            progress(0, 0, &format!("Adapter setup note: {}", stdout.trim()));
+        }
+        if !stderr.trim().is_empty() {
+            progress(0, 0, &format!("Adapter setup stderr: {}", stderr.trim()));
+        }
+        // Non-fatal — Host can still run; ISTA needs the adapter later.
+        Ok(())
+    }
 }
 
 #[cfg(windows)]

@@ -2,8 +2,8 @@
 
 ## Near term
 
-- [ ] Windows Npcap capture/inject backend for `enet-agent`
-- [ ] Wintun session backend for `enet-gateway`
+- [x] Windows Npcap capture/inject backend for `enet-agent` (v0.1.18)
+- [x] Host virtual `BMW-ENET` + Npcap L2 for ISTA (v0.1.18; loopback, not Wintun — Wintun is L3-only)
 - [ ] MSI installer via WiX / cargo-wix
 - [ ] Signed Windows service binaries
 - [ ] Auto-update channel

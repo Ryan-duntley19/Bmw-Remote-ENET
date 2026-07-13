@@ -78,8 +78,9 @@ Different networks (not the same router): see [REMOTE.md](REMOTE.md).
    | Vehicle connected | ENET link is up |
    | Vehicle awake | Car is answering |
 
-6. Open **ISTA+ / E-Sys / BimmerUtility** on the desktop.
-7. Use adapter **`BMW-ENET`** with IP **`169.254.1.1`**.
+6. Install **Npcap** on **both** PCs (https://npcap.com — enable WinPcap API compatibility). Re-run Setup / restart Host + Client after installing.
+7. On the desktop, confirm adapter **`BMW-ENET`** exists at **`169.254.1.1`** (Setup creates it).
+8. Open **ISTA+ / E-Sys / BimmerUtility** and select interface **`BMW-ENET`**.
 
 ---
 
@@ -115,10 +116,9 @@ Never flash over flaky Wi‑Fi or a high-latency relay.
 | Connection refused on `:47901` | Re-run `BMW-ENET-Setup.exe` → **Host** as Admin |
 | Only have a source ZIP | Download Setup from Releases (do not use the source ZIP alone) |
 | Laptop never connects | Same router? Exact pair code? Passwords match? |
-| “No desktop on this LAN” (Wi‑Fi + wired) | On laptop status page enter Desktop LAN IP → Connect |
-| Vehicle never awake | Reseat ENET, ignition ON, wait 10–20 seconds |
-| Setup: `VCRUNTIME140.dll` not found | Install [VC++ Redistributable x64](https://aka.ms/vs/17/release/vc_redist.x64.exe), or use Setup **v0.1.5+** |
-| ISTA cannot find the car | Wait until UI is fully green; use `169.254.1.1` on `BMW-ENET` |
+| “No desktop on this LAN” (Wi‑Fi + wired) | Status page → **Auto-find desktop** (v0.1.17+) |
+| Vehicle never awake | Npcap on laptop? ENET plugged? Ignition ON? |
+| ISTA cannot find the car | Npcap on **both** PCs; desktop adapter **BMW-ENET** @ **169.254.1.1**; ISTA selects BMW-ENET; Vehicle awake green |
 | Flash safety red | Use Ethernet or WireGuard; avoid hotel Wi‑Fi |
 
 Remote setups: [REMOTE.md](REMOTE.md) · Build from source: [DEVELOPERS.md](DEVELOPERS.md)

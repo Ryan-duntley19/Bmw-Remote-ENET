@@ -2,33 +2,34 @@
 
 ## Laptop (capture / inject)
 
-Production path: **Npcap** (`pcap_open_live` / sendpacket) on the ENET adapter only.
+Production path: **Npcap** (`pcap_open_live` / `sendpacket`) on the ENET adapter only.
 
 Requirements:
 
-- Npcap installed with WinPcap API compatibility
-- Process running elevated
+- Npcap installed with **WinPcap API compatibility**
+- Process elevated / SYSTEM (Setup scheduled task)
 - Interface selected via auto-detect (`169.254.0.0/16`, description heuristics) or `enet_interface`
 
-Do **not** capture the LAN adapter used for the UDP tunnel (hairpin / loops).
+Do **not** capture the LAN/Wi‑Fi adapter used for the UDP tunnel (hairpin / loops).
 
-## Desktop (virtual NIC)
+Implementation: `crates/enet-tunnel/src/pcap_ethernet.rs` → `PcapEthernet`, opened from `enet-agent`.
 
-Production path: **Wintun** preferred (modern, signed), TAP-Windows acceptable.
+## Desktop (virtual NIC for ISTA)
 
-1. Create adapter named `BMW-ENET` (or config `virtual_interface`).
-2. Configure IPv4 `169.254.1.1/16`.
-3. Gateway reads/writes L2 frames via Wintun ring buffers.
+ISTA needs a real Ethernet adapter named **`BMW-ENET`** at **`169.254.1.1/16`**.
 
-Hyper-V external switches are optional for advanced bridging and are not required.
+1. Setup (Host) creates a **Microsoft KM-TEST Loopback** adapter renamed `BMW-ENET` and assigns the tester IP (WeakHostSend/Receive enabled).
+2. Host opens that adapter with **Npcap** (`PcapEthernet`) and bridges L2 frames to/from the laptop tunnel.
+
+Npcap is required on the desktop as well (same WinPcap-compatible install).
 
 ## Current repository status
 
-CI / Linux builds use `SimulatedEthernet` so the tunnel, protocol, GUI API, and flash-safety logic are fully testable without hardware drivers.
+| Path | Status |
+|------|--------|
+| LAN tunnel + discovery | Done |
+| Host `BMW-ENET` + Npcap L2 | Done (v0.1.18+) |
+| Client ENET Npcap L2 | Done (v0.1.18+) |
+| Linux CI without Npcap | Uses `SimulatedEthernet` |
 
-Windows driver bindings should be added behind `#[cfg(windows)]` modules:
-
-- `crates/enet-agent/src/npcap.rs`
-- `crates/enet-gateway/src/wintun.rs`
-
-keeping the `EthernetPort` trait as the seam.
+Install Npcap on both Windows PCs before expecting ISTA to see the vehicle.

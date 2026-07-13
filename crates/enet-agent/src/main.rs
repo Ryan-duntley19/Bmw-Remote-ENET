@@ -208,15 +208,70 @@ async fn build_ethernet_port(
         std::mem::forget(_peer);
         return Ok(port);
     }
+
+    #[cfg(windows)]
+    {
+        if !enet_tunnel::PcapEthernet::npcap_available() {
+            eprintln!();
+            eprintln!("  *** Npcap required for ISTA ***");
+            eprintln!("  Install from https://npcap.com (enable WinPcap API compatibility),");
+            eprintln!("  then restart BMW ENET Client.");
+            eprintln!("  Tunnel can still connect, but car frames will NOT reach the desktop.");
+            eprintln!();
+        } else if let Some(iface) = pick_enet_interface(cfg.enet_interface.as_str()) {
+            // Only open the scored ENET candidate — never the Wi‑Fi / LAN tunnel NIC.
+            match enet_tunnel::PcapEthernet::open(&iface.name) {
+                Ok(port) => {
+                    let shown = port.display_name().to_string();
+                    info!(adapter = %port.name(), %shown, "Client L2 ENET capture ready");
+                    *enet_name.write() = shown.clone();
+                    enet_link.store(true, Ordering::Relaxed);
+                    eprintln!("  ENET capture: {shown}");
+                    return Ok(port);
+                }
+                Err(e) => {
+                    // Fall back: match Npcap description against the OS adapter name.
+                    warn!(error = %e, name = %iface.name, "direct pcap open failed; trying description match");
+                    if let Ok(list) = enet_tunnel::PcapEthernet::list_devices() {
+                        let want = iface.name.to_lowercase();
+                        for line in list {
+                            let lower = line.to_lowercase();
+                            if lower.contains(&want)
+                                || (want.len() >= 4 && lower.contains(want.trim()))
+                            {
+                                let npf = line.split('|').next().unwrap_or(&line);
+                                if let Ok(port) = enet_tunnel::PcapEthernet::open(npf) {
+                                    let shown = port.display_name().to_string();
+                                    *enet_name.write() = shown.clone();
+                                    enet_link.store(true, Ordering::Relaxed);
+                                    eprintln!("  ENET capture: {shown}");
+                                    return Ok(port);
+                                }
+                            }
+                        }
+                    }
+                    eprintln!();
+                    eprintln!("  Could not open Npcap on ENET adapter '{}'.", iface.name);
+                    eprintln!("  Run Client as Administrator / SYSTEM and confirm Npcap is installed.");
+                    eprintln!();
+                }
+            }
+        } else {
+            eprintln!();
+            eprintln!("  Npcap is installed but no ENET adapter was detected yet.");
+            eprintln!("  Plug the ENET cable into the car + laptop, then restart Client.");
+            eprintln!();
+        }
+    }
+
     let preferred = cfg.enet_interface.clone();
     if let Some(iface) = pick_enet_interface(preferred.as_str()) {
-        info!(name = %iface.name, mac = %iface.mac, "selected ENET candidate interface");
+        info!(name = %iface.name, mac = %iface.mac, "selected ENET candidate interface (link monitor only)");
         *enet_name.write() = iface.name.clone();
         let up = adapter_link_up(&iface.name);
         enet_link.store(up, Ordering::Relaxed);
         warn!(
-            "raw ENET capture requires Npcap (Windows) or CAP_NET_RAW (Linux); \
-             link indicator works now for '{}'. Tunnel to desktop will still connect.",
+            "L2 capture not active for '{}' — ISTA will not see the car until Npcap opens this NIC",
             iface.name
         );
         return Ok(Arc::new(MonitoredEthernet {

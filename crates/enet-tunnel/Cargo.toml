@@ -20,6 +20,9 @@ async-trait = { workspace = true }
 hostname = { workspace = true }
 chrono = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+pcap = "2"
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
 tempfile = { workspace = true }
