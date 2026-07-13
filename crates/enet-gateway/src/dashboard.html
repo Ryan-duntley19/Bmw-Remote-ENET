@@ -436,8 +436,12 @@ function renderStatus(s) {
   document.getElementById('awk-detail').textContent = awake ? 'Vehicle answering diagnostics' : 'Turn ignition ON / wake the car';
 
   const st = s.stats || {};
-  document.getElementById('m-rtt').textContent = (st.rtt_p99_ms || 0).toFixed(1) + ' ms';
-  document.getElementById('m-rtt-s').textContent = 'p99 · last ' + (st.rtt_ms || 0).toFixed(1) + ' ms';
+  document.getElementById('m-rtt').textContent = (s.rtt_to_laptop_ms || st.rtt_p99_ms || 0).toFixed(1) + ' ms';
+  const fromLap = s.rtt_from_laptop_ms || 0;
+  const toLap = s.rtt_to_laptop_ms || st.rtt_ms || 0;
+  document.getElementById('m-rtt-s').textContent = fromLap > 0
+    ? ('to laptop ' + toLap.toFixed(0) + ' · from laptop ' + fromLap.toFixed(0) + ' ms')
+    : ('p99 · last ' + (st.rtt_ms || 0).toFixed(1) + ' ms');
   const bw = (st.rx_bps || 0) + (st.tx_bps || 0);
   document.getElementById('m-bw').textContent = fmtMbps(bw);
   document.getElementById('m-bw-s').textContent = 'RX ' + fmtMbps(st.rx_bps || 0) + ' · TX ' + fmtMbps(st.tx_bps || 0);

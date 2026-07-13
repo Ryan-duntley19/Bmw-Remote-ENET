@@ -133,6 +133,10 @@ struct StatusResponse {
     lan_ips: Vec<String>,
     /// Ready-to-run laptop command when auto-discovery fails.
     connect_command: String,
+    /// Desktop-measured RTT to the laptop (desktop→laptop direction).
+    rtt_to_laptop_ms: f64,
+    /// Laptop-reported RTT (laptop→desktop direction).
+    rtt_from_laptop_ms: f64,
 }
 
 #[derive(Deserialize)]
@@ -464,8 +468,18 @@ async fn api_status(State(state): State<AppState>) -> Json<StatusResponse> {
     };
 
     let checker = FlashSafetyChecker::new(SafetyThresholds::from(&cfg));
+    // Tools traffic is desktop→laptop; use the worse of both directions for flash safety.
+    let mut stats_for_safety = stats.clone();
+    let to_laptop = gateway_state.rtt_local_ms.max(stats.rtt_p99_ms);
+    let from_laptop = gateway_state.rtt_peer_ms;
+    if to_laptop > stats_for_safety.rtt_p99_ms {
+        stats_for_safety.rtt_p99_ms = to_laptop;
+    }
+    if from_laptop > stats_for_safety.rtt_p99_ms {
+        stats_for_safety.rtt_p99_ms = from_laptop;
+    }
     let flash_safety = checker.evaluate(
-        &stats,
+        &stats_for_safety,
         &gateway_state.vehicle,
         cpu_pct,
         gateway_state.laptop_connected
@@ -508,6 +522,18 @@ async fn api_status(State(state): State<AppState>) -> Json<StatusResponse> {
                 .into(),
         );
     }
+    if gateway_state.laptop_connected
+        && gateway_state.rtt_local_ms > 40.0
+        && gateway_state.rtt_peer_ms > 0.0
+        && gateway_state.rtt_local_ms > gateway_state.rtt_peer_ms * 2.0
+    {
+        setup_hints.push(
+            "Desktop→laptop RTT is much higher than laptop→desktop — usually laptop Wi‑Fi power saving. Disable Wi‑Fi power save / use High performance / 5 GHz."
+                .into(),
+        );
+    }
+    let rtt_to_laptop = gateway_state.rtt_local_ms.max(stats.rtt_ms);
+    let rtt_from_laptop = gateway_state.rtt_peer_ms;
     Json(StatusResponse {
         state: gateway_state,
         stats,
@@ -525,6 +551,8 @@ async fn api_status(State(state): State<AppState>) -> Json<StatusResponse> {
         relay_url: cfg.relay_url.clone(),
         lan_ips,
         connect_command,
+        rtt_to_laptop_ms: rtt_to_laptop,
+        rtt_from_laptop_ms: rtt_from_laptop,
     })
 }
 

@@ -270,10 +270,7 @@ impl TunnelEngine {
                                             // Payload cookie: 0 = probe (reply), 1 = reply (do not re-reply)
                                             let is_reply = frame.payload.len() >= 8
                                                 && frame.payload.as_ref()[7] == 1;
-                                            let rtt = rtt_from_ts(frame.header.timestamp_ms_lo);
-                                            if rtt > 0.0 && is_reply {
-                                                stats.record_rtt_ms(rtt);
-                                            }
+                                            // Reply ASAP — Wi‑Fi sleep makes delayed replies look like 100ms+ RTT.
                                             if !is_reply {
                                                 let peer = *peer_slot.read();
                                                 if let Some(peer) = peer {
@@ -290,9 +287,18 @@ impl TunnelEngine {
                                                     }
                                                 }
                                             }
-                                            let mut st = state.write();
-                                            st.connection = ConnectionState::Connected;
-                                            st.laptop_connected = true;
+                                            let rtt = rtt_from_ts(frame.header.timestamp_ms_lo);
+                                            if rtt > 0.0 && is_reply {
+                                                stats.record_rtt_ms(rtt);
+                                                let mut st = state.write();
+                                                st.rtt_local_ms = rtt;
+                                                st.connection = ConnectionState::Connected;
+                                                st.laptop_connected = true;
+                                            } else {
+                                                let mut st = state.write();
+                                                st.connection = ConnectionState::Connected;
+                                                st.laptop_connected = true;
+                                            }
                                         }
                                         FrameType::Hello
                                         | FrameType::Status
@@ -350,10 +356,18 @@ impl TunnelEngine {
             let state = self.state.clone();
             let eth = self.eth.clone();
             tokio::spawn(async move {
-                let interval = Duration::from_millis(opts.keepalive_interval_ms.max(200));
+                // Agents probe often so the laptop Wi‑Fi radio stays awake; Status is less frequent.
+                let probe_ms = if opts.role == "agent" {
+                    opts.keepalive_interval_ms.clamp(200, 250)
+                } else {
+                    opts.keepalive_interval_ms.max(200)
+                };
+                let interval = Duration::from_millis(probe_ms);
                 let timeout = Duration::from_millis(opts.peer_timeout_ms.max(1000));
+                let mut tick: u32 = 0;
                 while running.load(Ordering::SeqCst) {
                     tokio::time::sleep(interval).await;
+                    tick = tick.wrapping_add(1);
                     let peer = *peer_slot.read();
                     if let Some(peer) = peer {
                         // Send keepalive FIRST so RTT isn't delayed by link checks.
@@ -373,35 +387,38 @@ impl TunnelEngine {
                             st.vehicle.awake = false;
                         }
                     }
+                    let send_status = opts.role != "agent" || tick % 4 == 0;
                     let peer = *peer_slot.read();
-                    if let Some(peer) = peer {
-                        let (rtt_ms, _rtt_p99, loss_rate) = stats.peek_quality();
-                        let st = state.read().clone();
-                        let status = ControlPayload::Status {
-                            vehicle_link: if opts.role == "agent" {
-                                st.vehicle.link_up
-                            } else {
-                                false
-                            },
-                            vehicle_awake: if opts.role == "agent" {
-                                st.vehicle.awake
-                            } else {
-                                false
-                            },
-                            peer_connected: matches!(st.connection, ConnectionState::Connected),
-                            packets_tx: stats.tx_packets(),
-                            packets_rx: stats.rx_packets(),
-                            loss_rate,
-                            rtt_ms,
-                        };
-                        if let Ok(payload) = status.to_bytes() {
-                            let seq = tx_seq.fetch_add(1, Ordering::Relaxed);
-                            let mut tf = TunnelFrame::keepalive(seq, now_ms_lo(), 0);
-                            tf.header.frame_type = FrameType::Status;
-                            tf.header.payload_len = payload.len() as u16;
-                            tf.payload = payload;
-                            if let Ok(pkt) = tf.encode(opts.crypto.as_ref()) {
-                                let _ = socket.send_to(&pkt, peer).await;
+                    if send_status {
+                        if let Some(peer) = peer {
+                            let (rtt_ms, _rtt_p99, loss_rate) = stats.peek_quality();
+                            let st = state.read().clone();
+                            let status = ControlPayload::Status {
+                                vehicle_link: if opts.role == "agent" {
+                                    st.vehicle.link_up
+                                } else {
+                                    false
+                                },
+                                vehicle_awake: if opts.role == "agent" {
+                                    st.vehicle.awake
+                                } else {
+                                    false
+                                },
+                                peer_connected: matches!(st.connection, ConnectionState::Connected),
+                                packets_tx: stats.tx_packets(),
+                                packets_rx: stats.rx_packets(),
+                                loss_rate,
+                                rtt_ms,
+                            };
+                            if let Ok(payload) = status.to_bytes() {
+                                let seq = tx_seq.fetch_add(1, Ordering::Relaxed);
+                                let mut tf = TunnelFrame::keepalive(seq, now_ms_lo(), 0);
+                                tf.header.frame_type = FrameType::Status;
+                                tf.header.payload_len = payload.len() as u16;
+                                tf.payload = payload;
+                                if let Ok(pkt) = tf.encode(opts.crypto.as_ref()) {
+                                    let _ = socket.send_to(&pkt, peer).await;
+                                }
                             }
                         }
                     }
@@ -477,6 +494,7 @@ fn apply_control(state: &Arc<RwLock<GatewayState>>, role: &str, ctrl: ControlPay
             vehicle_link,
             vehicle_awake,
             peer_connected,
+            rtt_ms,
             ..
         } => {
             // Laptop agent is the authority for vehicle ENET / awake.
@@ -484,6 +502,10 @@ fn apply_control(state: &Arc<RwLock<GatewayState>>, role: &str, ctrl: ControlPay
             if role == "gateway" {
                 st.vehicle.link_up = vehicle_link;
                 st.vehicle.awake = vehicle_awake;
+                // Laptop's view of RTT (usually lower — it initiates TX and wakes Wi‑Fi).
+                if rtt_ms.is_finite() && rtt_ms > 0.0 {
+                    st.rtt_peer_ms = rtt_ms;
+                }
             }
             // peer_connected in Status is "what the sender thinks"; for gateway the
             // presence of Status from the agent already means the laptop is up.
