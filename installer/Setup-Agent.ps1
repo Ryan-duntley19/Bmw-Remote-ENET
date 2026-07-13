@@ -24,6 +24,52 @@ Write-Host "This PC stays near the car. The ENET cable plugs in here."
 Write-Host "The desktop is found automatically on your Wi-Fi/Ethernet."
 Write-Host ""
 
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = Split-Path -Parent $here
+$releaseDir = Join-Path $repoRoot "target\release"
+
+function Find-Binary([string]$Name) {
+  $candidates = @(
+    (Join-Path $here $Name),
+    (Join-Path $releaseDir $Name)
+  )
+  foreach ($c in $candidates) {
+    if (Test-Path $c) { return $c }
+  }
+  return $null
+}
+
+$required = @("enet-agent.exe", "enet-setup.exe")
+$missing = @()
+$sources = @{}
+
+foreach ($bin in $required) {
+  $src = Find-Binary $bin
+  if ($src) {
+    $sources[$bin] = $src
+  } else {
+    $missing += $bin
+  }
+}
+
+if ($missing.Count -gt 0) {
+  Write-Host "ERROR: Required Windows binaries were not found." -ForegroundColor Red
+  Write-Host ""
+  Write-Host "Missing:" -ForegroundColor Yellow
+  foreach ($m in $missing) { Write-Host "  - $m" }
+  Write-Host ""
+  Write-Host "You likely downloaded source code only (no .exe files)."
+  Write-Host "Build them first, then re-run this installer:"
+  Write-Host ""
+  Write-Host "  1. Install Rust from https://rustup.rs" -ForegroundColor Cyan
+  Write-Host "  2. In this folder, right-click Build-Windows.ps1 -> Run with PowerShell" -ForegroundColor Cyan
+  Write-Host "  3. Run Install-Laptop.bat again" -ForegroundColor Cyan
+  Write-Host ""
+  Write-Host "Or from the repo root in PowerShell:"
+  Write-Host "  .\installer\Build-Windows.ps1"
+  exit 1
+}
+
 if (-not $PairCode) {
   $PairCode = Read-Host "Pair code from desktop dashboard (Enter to auto-find any gateway)"
 }
@@ -32,15 +78,9 @@ New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 New-Item -ItemType Directory -Force -Path "$InstallDir\config" | Out-Null
 New-Item -ItemType Directory -Force -Path "$InstallDir\logs" | Out-Null
 
-$here = Split-Path -Parent $MyInvocation.MyCommand.Path
-foreach ($bin in @("enet-agent.exe", "enet-setup.exe")) {
-  $src = Join-Path $here $bin
-  if (Test-Path $src) {
-    Copy-Item -Force $src (Join-Path $InstallDir $bin)
-    Write-Host "  Installed $bin"
-  } else {
-    Write-Host "  WARNING: $bin not found next to this script" -ForegroundColor Yellow
-  }
+foreach ($bin in $required) {
+  Copy-Item -Force $sources[$bin] (Join-Path $InstallDir $bin)
+  Write-Host "  Installed $bin  (from $($sources[$bin]))"
 }
 
 $npcap = Get-ItemProperty HKLM:\Software\Npcap -ErrorAction SilentlyContinue
@@ -73,6 +113,14 @@ if (-not $SkipService -and (Test-Path (Join-Path $InstallDir "enet-agent.exe")))
   sc.exe create BmwEnetAgent binPath= $binPath start= auto | Out-Null
   sc.exe description BmwEnetAgent "BMW ENET laptop agent (auto-finds desktop)" | Out-Null
   sc.exe start BmwEnetAgent | Out-Null
+  Start-Sleep -Seconds 2
+  $svc = Get-Service BmwEnetAgent -ErrorAction SilentlyContinue
+  if ($svc -and $svc.Status -eq "Running") {
+    Write-Host "  Service BmwEnetAgent is running." -ForegroundColor Green
+  } else {
+    Write-Host "  WARNING: service did not start. Try:" -ForegroundColor Yellow
+    Write-Host "    & `"$InstallDir\enet-agent.exe`" --config `"$config`""
+  }
 }
 
 Write-Host ""

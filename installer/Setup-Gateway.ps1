@@ -21,18 +21,69 @@ Write-Host "=== BMW ENET Gateway - Desktop setup ===" -ForegroundColor Cyan
 Write-Host "This PC will run ISTA / E-Sys. Your laptop near the car connects automatically."
 Write-Host ""
 
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = Split-Path -Parent $here
+$releaseDir = Join-Path $repoRoot "target\release"
+
+function Find-Binary([string]$Name) {
+  $candidates = @(
+    (Join-Path $here $Name),
+    (Join-Path $releaseDir $Name)
+  )
+  foreach ($c in $candidates) {
+    if (Test-Path $c) { return $c }
+  }
+  return $null
+}
+
+$required = @("enet-gateway.exe", "enet-setup.exe")
+$optional = @("enet-gui.exe")
+$missing = @()
+$sources = @{}
+
+foreach ($bin in $required) {
+  $src = Find-Binary $bin
+  if ($src) {
+    $sources[$bin] = $src
+  } else {
+    $missing += $bin
+  }
+}
+foreach ($bin in $optional) {
+  $src = Find-Binary $bin
+  if ($src) { $sources[$bin] = $src }
+}
+
+if ($missing.Count -gt 0) {
+  Write-Host "ERROR: Required Windows binaries were not found." -ForegroundColor Red
+  Write-Host ""
+  Write-Host "Missing:" -ForegroundColor Yellow
+  foreach ($m in $missing) { Write-Host "  - $m" }
+  Write-Host ""
+  Write-Host "You likely downloaded source code only (no .exe files)."
+  Write-Host "Build them first, then re-run this installer:"
+  Write-Host ""
+  Write-Host "  1. Install Rust from https://rustup.rs" -ForegroundColor Cyan
+  Write-Host "  2. In this folder, right-click Build-Windows.ps1 -> Run with PowerShell" -ForegroundColor Cyan
+  Write-Host "  3. Run Install-Desktop.bat again" -ForegroundColor Cyan
+  Write-Host ""
+  Write-Host "Or from the repo root in PowerShell:"
+  Write-Host "  .\installer\Build-Windows.ps1"
+  Write-Host ""
+  Write-Host "Dashboard was NOT opened because nothing is installed yet." -ForegroundColor Yellow
+  exit 1
+}
+
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 New-Item -ItemType Directory -Force -Path "$InstallDir\config" | Out-Null
 New-Item -ItemType Directory -Force -Path "$InstallDir\logs" | Out-Null
 
-$here = Split-Path -Parent $MyInvocation.MyCommand.Path
-foreach ($bin in @("enet-gateway.exe", "enet-gui.exe", "enet-setup.exe")) {
-  $src = Join-Path $here $bin
-  if (Test-Path $src) {
-    Copy-Item -Force $src (Join-Path $InstallDir $bin)
-    Write-Host "  Installed $bin"
+foreach ($bin in ($required + $optional)) {
+  if ($sources.ContainsKey($bin)) {
+    Copy-Item -Force $sources[$bin] (Join-Path $InstallDir $bin)
+    Write-Host "  Installed $bin  (from $($sources[$bin]))"
   } else {
-    Write-Host "  WARNING: $bin not found next to this script (build/copy it first)" -ForegroundColor Yellow
+    Write-Host "  NOTE: $bin not found (optional; browser dashboard still works)" -ForegroundColor Yellow
   }
 }
 
@@ -59,6 +110,14 @@ if (-not $SkipService -and (Test-Path (Join-Path $InstallDir "enet-gateway.exe")
   sc.exe create BmwEnetGateway binPath= $binPath start= auto | Out-Null
   sc.exe description BmwEnetGateway "BMW ENET desktop gateway (auto-discovers laptop)" | Out-Null
   sc.exe start BmwEnetGateway | Out-Null
+  Start-Sleep -Seconds 2
+  $svc = Get-Service BmwEnetGateway -ErrorAction SilentlyContinue
+  if ($svc -and $svc.Status -eq "Running") {
+    Write-Host "  Service BmwEnetGateway is running." -ForegroundColor Green
+  } else {
+    Write-Host "  WARNING: service did not start. Try:" -ForegroundColor Yellow
+    Write-Host "    & `"$InstallDir\enet-gateway.exe`" --config `"$config`""
+  }
 }
 
 $gui = Join-Path $InstallDir "enet-gui.exe"

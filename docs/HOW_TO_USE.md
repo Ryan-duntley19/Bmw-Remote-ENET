@@ -144,6 +144,8 @@ For remote mode, set password on **both** desktop and laptop.
 
 | You see | Try this |
 |---------|----------|
+| Browser: connection refused on `:47901` | Binaries were not built/installed. Run `installer\Build-Windows.ps1`, then `Install-Desktop.bat` as Admin |
+| Installer: `enet-gateway.exe not found` | Same as above — GitHub ZIP has source only, no `.exe` |
 | GUI: “Gateway not reachable” | Start `enet-gateway` or re-run `Install-Desktop.bat` |
 | Laptop never connects | Same Wi‑Fi? Pair code correct? Agent running? |
 | Vehicle never awake | Reseat ENET, ignition ON, wait 10–20 seconds |

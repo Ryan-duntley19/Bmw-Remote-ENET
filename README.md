@@ -21,13 +21,15 @@ Short version:
 
 ## 5-minute setup
 
+**Windows (from a GitHub ZIP):** install Rust → run `installer\Build-Windows.ps1` once → then the Install bat files below.
+
 - Same network → **[docs/QUICKSTART.md](docs/QUICKSTART.md)**  
 - Different networks → **[docs/REMOTE.md](docs/REMOTE.md)**  
 - Install details → **[docs/INSTALL.md](docs/INSTALL.md)**
 
 | Situation | What to run |
 |-----------|-------------|
-| Same home Wi‑Fi | `Install-Desktop.bat` + `Install-Laptop.bat` |
+| Same home Wi‑Fi | `Build-Windows.ps1` once, then `Install-Desktop.bat` + `Install-Laptop.bat` |
 | Different networks | `enet-relay` on a VPS + `enet-setup … --remote-relay` |
 | Best remote quality | `enet-setup wireguard` then import WireGuard configs |
 
