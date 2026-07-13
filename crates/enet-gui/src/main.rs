@@ -1,4 +1,4 @@
-//! BMW ENET Gateway GUI (egui).
+//! BMW ENET Gateway GUI — friendly status + first-run guidance.
 
 use chrono::Local;
 use clap::Parser;
@@ -12,7 +12,6 @@ use std::time::{Duration, Instant};
 #[derive(Parser, Debug)]
 #[command(name = "enet-gui")]
 struct Args {
-    /// Gateway API base URL
     #[arg(long, default_value = "http://127.0.0.1:47901")]
     api: String,
 }
@@ -25,6 +24,14 @@ struct StatusResponse {
     memory_used: u64,
     memory_total: u64,
     flash_safety: FlashSafetyReport,
+    #[serde(default)]
+    pair_code: String,
+    #[serde(default)]
+    setup_hints: Vec<String>,
+    #[serde(default)]
+    setup_complete: bool,
+    #[serde(default)]
+    friendly_status: String,
 }
 
 struct GatewayApp {
@@ -33,6 +40,7 @@ struct GatewayApp {
     last_fetch: Instant,
     log_lines: Vec<String>,
     settings_open: bool,
+    help_open: bool,
     password: String,
     tunnel_port: String,
     error: Option<String>,
@@ -45,8 +53,12 @@ impl GatewayApp {
             api,
             status: StatusResponse::default(),
             last_fetch: Instant::now() - Duration::from_secs(10),
-            log_lines: vec![format!("{}  GUI started", Local::now().format("%H:%M:%S"))],
+            log_lines: vec![format!(
+                "{}  Welcome — open Help if this is your first time",
+                Local::now().format("%H:%M:%S")
+            )],
             settings_open: false,
+            help_open: true,
             password: String::new(),
             tunnel_port: "47900".into(),
             error: None,
@@ -69,12 +81,21 @@ impl GatewayApp {
         match self.client.get(format!("{}/api/status", self.api)).send() {
             Ok(resp) => match resp.json::<StatusResponse>() {
                 Ok(s) => {
+                    if !s.setup_complete {
+                        self.help_open = true;
+                    }
                     self.status = s;
                     self.error = None;
                 }
-                Err(e) => self.error = Some(format!("parse status: {e}")),
+                Err(e) => self.error = Some(format!("Could not read status: {e}")),
             },
-            Err(e) => self.error = Some(format!("API unreachable: {e}")),
+            Err(_) => {
+                self.error = Some(
+                    "Gateway not reachable. Start it with the desktop installer, or run enet-gateway."
+                        .into(),
+                );
+                self.help_open = true;
+            }
         }
         self.last_fetch = Instant::now();
     }
@@ -114,13 +135,25 @@ impl eframe::App for GatewayApp {
                         .size(28.0)
                         .color(egui::Color32::from_rgb(220, 230, 240)),
                 );
-                ui.add_space(12.0);
-                ui.label(
-                    egui::RichText::new("F-Series remote diagnostics bridge")
-                        .size(14.0)
-                        .color(egui::Color32::from_rgb(140, 160, 175)),
-                );
+                ui.add_space(16.0);
+                if !self.status.pair_code.is_empty() {
+                    ui.label(
+                        egui::RichText::new(format!("Pair code {}", self.status.pair_code))
+                            .size(22.0)
+                            .color(egui::Color32::from_rgb(0, 180, 200)),
+                    );
+                }
             });
+            let friendly = if self.status.friendly_status.is_empty() {
+                self.status.state.status_message.clone()
+            } else {
+                self.status.friendly_status.clone()
+            };
+            ui.label(
+                egui::RichText::new(friendly)
+                    .size(15.0)
+                    .color(egui::Color32::from_rgb(140, 160, 175)),
+            );
             ui.add_space(6.0);
         });
 
@@ -139,9 +172,19 @@ impl eframe::App for GatewayApp {
                 if ui.button("Settings").clicked() {
                     self.settings_open = true;
                 }
-                if ui.button("Diagnostics").clicked() {
-                    self.refresh();
-                    self.push_log("Diagnostics refresh");
+                if ui.button("Setup help").clicked() {
+                    self.help_open = true;
+                }
+                if ui.button("Open in browser").clicked() {
+                    self.push_log(format!("Open {} in your browser", self.api));
+                    #[cfg(target_os = "windows")]
+                    let _ = std::process::Command::new("cmd")
+                        .args(["/C", "start", &self.api])
+                        .spawn();
+                    #[cfg(target_os = "linux")]
+                    let _ = std::process::Command::new("xdg-open").arg(&self.api).spawn();
+                    #[cfg(target_os = "macos")]
+                    let _ = std::process::Command::new("open").arg(&self.api).spawn();
                 }
                 if ui.button("Export Logs").clicked() {
                     self.post("/api/export-logs");
@@ -154,30 +197,29 @@ impl eframe::App for GatewayApp {
             .resizable(true)
             .default_width(280.0)
             .show(ctx, |ui| {
-                ui.heading("Status");
+                ui.heading("Connection");
                 ui.separator();
-                status_row(ui, "Gateway Running", self.status.state.gateway_running);
-                status_row(ui, "Laptop Connected", self.status.state.laptop_connected);
-                status_row(ui, "Vehicle Connected", self.status.state.vehicle.link_up);
-                status_row(ui, "Vehicle Awake", self.status.state.vehicle.awake);
+                status_row(ui, "Gateway running", self.status.state.gateway_running);
+                status_row(ui, "Laptop connected", self.status.state.laptop_connected);
+                status_row(ui, "Vehicle connected", self.status.state.vehicle.link_up);
+                status_row(ui, "Vehicle awake", self.status.state.vehicle.awake);
                 status_row(
                     ui,
-                    "ENET / Tunnel",
+                    "Tunnel ready",
                     matches!(
                         self.status.state.connection,
                         enet_core::state::ConnectionState::Connected
                     ),
                 );
                 ui.separator();
-                ui.label(format!("State: {:?}", self.status.state.connection));
-                ui.label(&self.status.state.status_message);
                 if let Some(err) = &self.error {
                     ui.colored_label(egui::Color32::from_rgb(220, 90, 70), err);
+                    ui.label("Tip: run the desktop installer, then click Setup help.");
                 }
             });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Telemetry");
+            ui.heading("Live stats");
             ui.separator();
             let s = &self.status.stats;
             ui.columns(3, |cols| {
@@ -188,23 +230,9 @@ impl eframe::App for GatewayApp {
                 cols[2].label(format!("Loss: {:.4}%", s.loss_rate * 100.0));
                 cols[2].label(format!("CPU: {:.1}%", self.status.cpu_pct));
             });
-            ui.label(format!(
-                "Bandwidth ~ TX {:.0} B/s  RX {:.0} B/s",
-                s.tx_bps / 8.0,
-                s.rx_bps / 8.0
-            ));
-            ui.label(format!(
-                "Errors: {}  Dropped: {}  Reconnects: {}",
-                s.errors, s.dropped, s.reconnects
-            ));
-            ui.label(format!(
-                "Memory: {:.1} / {:.1} MB",
-                self.status.memory_used as f64 / 1_048_576.0,
-                self.status.memory_total as f64 / 1_048_576.0
-            ));
 
             ui.add_space(12.0);
-            ui.heading("Flash Safety");
+            ui.heading("Flash safety");
             ui.separator();
             let safe = self.status.flash_safety.safe;
             let color = if safe {
@@ -215,28 +243,68 @@ impl eframe::App for GatewayApp {
             ui.colored_label(
                 color,
                 if safe {
-                    "SAFE — thresholds met"
+                    "SAFE — thresholds met (still flash at your own risk)"
                 } else {
-                    "NOT SAFE — do not flash"
+                    "NOT SAFE — do not flash ECUs yet"
                 },
             );
             ui.label(&self.status.flash_safety.warning);
-            for r in &self.status.flash_safety.reasons {
-                ui.label(format!("• {r}"));
-            }
 
             ui.add_space(12.0);
-            ui.heading("Log");
+            ui.heading("Activity log");
             ui.separator();
             egui::ScrollArea::vertical()
                 .stick_to_bottom(true)
-                .max_height(220.0)
+                .max_height(200.0)
                 .show(ui, |ui| {
                     for line in &self.log_lines {
                         ui.monospace(line);
                     }
                 });
         });
+
+        if self.help_open {
+            egui::Window::new("Setup help — do this once")
+                .collapsible(false)
+                .resizable(true)
+                .default_width(480.0)
+                .show(ctx, |ui| {
+                    ui.label("You do not need to know networking. Follow these steps:");
+                    ui.add_space(8.0);
+                    if self.status.setup_hints.is_empty() {
+                        ui.label("1. Keep this desktop on your home network.");
+                        ui.label("2. Install/start the Gateway on this PC.");
+                        ui.label("3. On the laptop, run the Agent installer (auto-finds this PC).");
+                        ui.label("4. Plug ENET into the car + laptop, ignition ON.");
+                        ui.label("5. When Laptop + Vehicle lights are green, open ISTA/E-Sys here.");
+                    } else {
+                        for h in &self.status.setup_hints {
+                            ui.label(h);
+                        }
+                    }
+                    ui.add_space(8.0);
+                    if !self.status.pair_code.is_empty() {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Tell the laptop this pair code: {}",
+                                self.status.pair_code
+                            ))
+                            .size(18.0)
+                            .color(egui::Color32::from_rgb(0, 180, 200)),
+                        );
+                    }
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("I finished setup").clicked() {
+                            self.post("/api/complete-setup");
+                            self.help_open = false;
+                        }
+                        if ui.button("Close").clicked() {
+                            self.help_open = false;
+                        }
+                    });
+                });
+        }
 
         if self.settings_open {
             egui::Window::new("Settings")
@@ -245,7 +313,7 @@ impl eframe::App for GatewayApp {
                 .show(ctx, |ui| {
                     ui.label("Tunnel port");
                     ui.text_edit_singleline(&mut self.tunnel_port);
-                    ui.label("Password (PSK)");
+                    ui.label("Optional password (same on laptop)");
                     ui.text_edit_singleline(&mut self.password);
                     if ui.button("Save").clicked() {
                         let port: u16 = self.tunnel_port.parse().unwrap_or(47900);
@@ -285,7 +353,7 @@ fn main() -> eframe::Result<()> {
     let args = Args::parse();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([960.0, 640.0])
+            .with_inner_size([980.0, 680.0])
             .with_title("BMW ENET Gateway"),
         ..Default::default()
     };

@@ -1,52 +1,58 @@
 # BMW ENET Remote Gateway
 
-Transparent Layer-2 Ethernet tunnel that lets a **desktop PC** run ISTA+, E-Sys, BimmerUtility, Tool32, and related BMW F-Series tools while the **ENET cable** stays plugged into a **laptop** near the vehicle.
+Connect your **desktop** (ISTA / E-Sys) to your BMW while the **ENET cable** stays on a **laptop** near the car.
 
-**Target vehicle:** 2017 BMW M240i Convertible (F23 / B58)
+**No manual IP configuration required** — the laptop finds the desktop on your Wi‑Fi/Ethernet automatically.
 
-## Recommended architecture
+## 5-minute setup
 
-**Custom L2 Ethernet-over-UDP tunnel** (not Layer-3 port forwarding).
+See **[docs/QUICKSTART.md](docs/QUICKSTART.md)**.
 
-BMW ENET discovery depends on ARP and UDP broadcasts (`169.254.0.0/16`, HSFZ UDP 6811, DoIP 13400). Only a Layer-2 tunnel preserves tool behavior as if the ENET cable were local.
+| PC | What to run |
+|----|-------------|
+| Desktop | Double-click `installer/Install-Desktop.bat` |
+| Laptop | Double-click `installer/Install-Laptop.bat` |
+
+Then open **http://127.0.0.1:47901/** on the desktop — that dashboard is the main UI.
+
+```bash
+# From source
+enet-setup gateway --yes && enet-gateway
+# other PC:
+enet-setup agent && enet-agent
+```
+
+## How it works
+
+Transparent **Layer-2 Ethernet-over-UDP** tunnel (required for BMW discovery / ARP / HSFZ / DoIP).
 
 ```
-Vehicle ──ENET──► Laptop Agent ══UDP :47900══► Desktop Gateway ──TAP/Wintun──► ISTA / E-Sys
+Vehicle ──ENET──► Laptop agent ══ auto-discover LAN ══► Desktop gateway ──► ISTA / E-Sys
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full options analysis.
+Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · BMW notes: [docs/BMW_ENET.md](docs/BMW_ENET.md)
 
 ## Components
 
-| Binary | Role |
-|--------|------|
-| `enet-agent` | Laptop: captures ENET NIC, tunnels frames to desktop |
-| `enet-gateway` | Desktop Windows service + control API |
-| `enet-gui` | Status / settings / flash-safety UI |
-| `enet-sim` | Simulated BMW traffic for CI / lab |
-
-## Quick start (lab / CI)
-
-```bash
-# Requires Rust 1.85+
-cargo test --workspace --exclude enet-gui
-cargo run -p enet-sim -- lab --seconds 5 --flaps --burst 200
-cargo run -p enet-gateway -- --simulate --run-seconds 3
-```
-
-## Production setup (Windows LAN)
-
-1. Install on **desktop**: `enet-gateway`, `enet-gui`, Wintun (or TAP-Windows), Npcap optional on desktop.
-2. Install on **laptop**: `enet-agent`, Npcap (required for raw ENET capture/inject).
-3. Copy `config/gateway.toml` / `config/agent.toml` and set `peer_addr` on the agent to the desktop LAN IP.
-4. Start gateway service, then agent. Open GUI on the desktop.
-5. Configure ISTA/E-Sys to use the virtual `BMW-ENET` adapter (`169.254.1.1/16`).
-
-Full steps: [docs/INSTALL.md](docs/INSTALL.md) · User manual: [docs/USER_MANUAL.md](docs/USER_MANUAL.md)
+| Tool | Role |
+|------|------|
+| `enet-setup` | First-run wizard (`gateway` / `agent` / `find` / `doctor`) |
+| `enet-gateway` | Desktop service + browser dashboard |
+| `enet-agent` | Laptop tunnel (auto-discovers desktop) |
+| `enet-gui` | Optional native GUI |
+| `enet-sim` | Lab traffic without a car |
 
 ## Safety
 
-The gateway **never writes** to the vehicle. The flash-safety gate warns when latency, loss, or CPU exceed thresholds. Do not flash ECUs until the GUI shows **SAFE**.
+The software **never writes** to the vehicle. Flash only when the dashboard says flash safety is OK.
+
+## Build / test
+
+```bash
+cargo test --workspace --exclude enet-gui
+cargo run -p enet-setup -- gateway --yes
+cargo run -p enet-gateway -- --simulate --run-seconds 2
+```
 
 ## License
 

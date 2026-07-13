@@ -1,23 +1,23 @@
+# Easy defaults for the desktop gateway.
+# Run: enet-setup gateway   (recommended first-time setup)
+
 role = "gateway"
 tunnel_port = 47900
-# Leave peer_addr unset to accept the first allowed agent
+api_port = 47901
+discovery_port = 47902
+auto_discover = true
+# pair_code is generated automatically on first start
+pair_code = ""
+password = ""
+require_crypto = false
+auto_start = true
+setup_complete = false
 allowed_cidrs = ["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"]
-enet_interface = ""
-lan_interface = ""
 virtual_interface = "BMW-ENET"
 tester_ip = "169.254.1.1"
 tester_mask = "255.255.0.0"
-password = ""
-require_crypto = false
-tls_enabled = false
-auto_start = true
-reconnect_delay_ms = 500
-reconnect_delay_max_ms = 10000
-keepalive_interval_ms = 1000
-peer_timeout_ms = 5000
 log_level = "info"
 log_dir = "logs"
-api_port = 47901
 manage_firewall = true
 safety_rtt_p99_ms = 20.0
 safety_max_loss_rate = 0.001

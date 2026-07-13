@@ -1,25 +1,21 @@
+# Easy defaults for the laptop agent.
+# Run: enet-setup agent   (recommended — finds the desktop automatically)
+
 role = "agent"
 tunnel_port = 47900
-# Desktop gateway IP on your LAN (required)
-peer_addr = "192.168.1.10"
-allowed_cidrs = ["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"]
-enet_interface = ""
-lan_interface = ""
-virtual_interface = "BMW-ENET"
-tester_ip = "169.254.1.1"
-tester_mask = "255.255.0.0"
+api_port = 47901
+discovery_port = 47902
+auto_discover = true
+# Optional: paste the pair code from the desktop dashboard
+pair_code = ""
+# Leave peer_addr unset to auto-discover
+# peer_addr = "192.168.1.10"
 password = ""
 require_crypto = false
-tls_enabled = false
 auto_start = true
-reconnect_delay_ms = 500
-reconnect_delay_max_ms = 10000
-keepalive_interval_ms = 1000
-peer_timeout_ms = 5000
+setup_complete = false
+allowed_cidrs = ["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"]
+enet_interface = ""
 log_level = "info"
 log_dir = "logs"
-api_port = 47901
 manage_firewall = true
-safety_rtt_p99_ms = 20.0
-safety_max_loss_rate = 0.001
-safety_max_cpu_pct = 80.0

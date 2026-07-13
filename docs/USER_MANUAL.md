@@ -1,68 +1,55 @@
 # User Manual
 
-## What you see in the GUI
+## Easiest path
 
-| Indicator | Meaning |
-|-----------|---------|
-| Gateway Running | Desktop service / tunnel process is up |
-| Laptop Connected | Agent peer is online |
-| Vehicle Connected | ENET link reported up |
-| Vehicle Awake | Recent ENET activity |
-| ENET / Tunnel | Tunnel state is `Connected` |
-| Packet rate / RTT / Loss / CPU | Live telemetry |
-| Flash Safety | Whether programming is advisable |
+Follow **[QUICKSTART.md](QUICKSTART.md)** — double-click installers, no IP typing.
 
-Buttons: **Start**, **Stop**, **Restart**, **Settings**, **Diagnostics**, **Export Logs**.
+## What you see
 
-## Daily workflow
+### Browser dashboard (`http://127.0.0.1:47901/`)
 
-1. Park near the car; connect ENET cable to the laptop.
-2. Confirm laptop and desktop are on the same LAN.
-3. Start (or auto-start) `enet-gateway` on the desktop and `enet-agent` on the laptop.
-4. Open **BMW ENET Gateway** GUI on the desktop.
-5. Wait until Laptop Connected + Vehicle Awake.
-6. Launch ISTA+ / E-Sys / BimmerUtility on the desktop against the `BMW-ENET` adapter.
-7. For coding: proceed when loss/RTT look healthy.
-8. For **flashing**: only when Flash Safety shows **SAFE**.
+- Large **pair code** for the laptop
+- Green/grey lights: Gateway / Laptop / Vehicle / Awake
+- Flash safety verdict
+- Step-by-step checklist
 
-## Settings
+### Native GUI (`enet-gui`)
 
-| Setting | Guidance |
-|---------|----------|
-| Tunnel port | Default 47900; must match both sides |
-| Password | Optional PSK; enable `require_crypto` on both |
-| Reconnect delay | Base backoff when the peer drops |
-| Timeouts | Peer timeout; increase slightly on flaky Wi-Fi |
-| Allowed CIDRs | Keep tight to your LAN |
-| Auto start | Install as Windows service / scheduled task |
-| Logging level | `info` normal; `debug` for troubleshooting |
+Same status, plus Setup help, Settings, Export logs, Open in browser.
 
-## Recovery behavior
+## Pairing
 
-| Event | Expected behavior |
-|-------|-------------------|
-| Cable unplug | Vehicle Connected clears; tunnel stays up |
-| Vehicle sleep | Awake clears; rediscovery on wake |
-| Ignition cycle | Tool TCP sessions drop; reconnect in the tool |
-| Laptop sleep/disconnect | Gateway shows reconnecting; agent backs off |
-| Desktop reboot | Service starts; agent reconnects automatically |
+1. Desktop shows pair code `BMW-XXXX`.
+2. Laptop installer asks for it (or press Enter to auto-find).
+3. Agent discovers the desktop on UDP 47902 — **no desktop IP needed**.
+
+## Daily use
+
+1. Services auto-start after install.
+2. Plug ENET → ignition ON.
+3. Wait for Laptop + Vehicle lights.
+4. Open ISTA/E-Sys on the desktop.
+5. Flash only when safety says OK.
+
+## Commands worth knowing
+
+```bash
+enet-setup gateway --yes
+enet-setup agent
+enet-setup find
+enet-setup doctor --role agent
+enet-agent --pair-code BMW-XXXX
+```
 
 ## Troubleshooting
 
-| Symptom | Checks |
-|---------|--------|
-| Laptop never connects | Firewall UDP 47900; `peer_addr`; same password/crypto flags |
-| Vehicle never awake | ENET cable, ignition, Npcap on correct NIC, activation line |
-| ISTA cannot find car | Virtual NIC IP `169.254.1.1/16`; L2 tunnel connected; try discovery again |
-| High loss / NOT SAFE | Prefer Ethernet over Wi-Fi; close bandwidth hogs; shorten path |
-| GUI API unreachable | Gateway running; API on `127.0.0.1:47901` |
+| Symptom | Fix |
+|---------|-----|
+| API / dashboard unreachable | Start gateway / Install-Desktop.bat |
+| Laptop cannot find desktop | Same Wi‑Fi; pair code; private network profile; UDP 47902 allowed |
+| Vehicle never awake | Cable, ignition, wait after plug-in |
+| ISTA cannot see car | Tunnel Connected first; tester IP `169.254.1.1` on virtual NIC |
 
-## Logging
+## Safety
 
-Logs rotate daily under `logs/enet-gateway.log.*`. Use **Export Logs** to dump a bundle for support.
-
-## Safety rules
-
-- Never flash when the GUI warns.
-- Never leave a programming session unattended on Wi-Fi.
-- This software does not modify vehicle data by itself — tools do. Use trusted tooling only.
+Never flash when the UI warns. This gateway never modifies vehicle data by itself.

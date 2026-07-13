@@ -1314,6 +1314,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "enet-setup"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "enet-core",
+ "enet-protocol",
+ "hostname",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "enet-sim"
 version = "0.1.0"
 dependencies = [
