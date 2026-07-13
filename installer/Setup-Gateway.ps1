@@ -5,6 +5,9 @@
 .DESCRIPTION
   Copies binaries, writes config, opens firewall, installs auto-start service,
   creates a desktop shortcut, and opens the dashboard in your browser.
+
+  NOTE: Keep this file ASCII-only. Windows PowerShell 5.1 without a UTF-8 BOM
+  mis-parses Unicode punctuation and breaks Write-Host strings.
 #>
 param(
   [string]$InstallDir = "$env:ProgramFiles\BMW-ENET-Gateway",
@@ -14,7 +17,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 Write-Host ""
-Write-Host "=== BMW ENET Gateway — Desktop setup ===" -ForegroundColor Cyan
+Write-Host "=== BMW ENET Gateway - Desktop setup ===" -ForegroundColor Cyan
 Write-Host "This PC will run ISTA / E-Sys. Your laptop near the car connects automatically."
 Write-Host ""
 
@@ -73,8 +76,8 @@ if (Test-Path $gui) {
 
 Write-Host ""
 Write-Host "Done." -ForegroundColor Green
-Write-Host "1) Open http://127.0.0.1:47901/  (pair code is shown there)"
-Write-Host "2) On the laptop, right-click Setup-Agent.ps1 -> Run with PowerShell"
-Write-Host "3) Plug ENET into the car + laptop, ignition ON, then open ISTA/E-Sys here."
+Write-Host '1. Open http://127.0.0.1:47901/  (pair code is shown there)'
+Write-Host '2. On the laptop, right-click Setup-Agent.ps1 -> Run with PowerShell'
+Write-Host '3. Plug ENET into the car + laptop, ignition ON, then open ISTA/E-Sys here.'
 Write-Host ""
-Start-Process "http://127.0.0.1:47901/"
+Start-Process 'http://127.0.0.1:47901/'

@@ -172,7 +172,7 @@ impl eframe::App for GatewayApp {
                 if ui.button("Settings").clicked() {
                     self.settings_open = true;
                 }
-                if ui.button("Setup help").clicked() {
+                if ui.button("How to use").clicked() {
                     self.help_open = true;
                 }
                 if ui.button("Open in browser").clicked() {
@@ -214,7 +214,7 @@ impl eframe::App for GatewayApp {
                 ui.separator();
                 if let Some(err) = &self.error {
                     ui.colored_label(egui::Color32::from_rgb(220, 90, 70), err);
-                    ui.label("Tip: run the desktop installer, then click Setup help.");
+                    ui.label("Tip: run the desktop installer, then click How to use.");
                 }
             });
 

@@ -5,6 +5,9 @@
 .DESCRIPTION
   Copies binaries, optionally asks for pair code, writes config with auto-discover,
   installs auto-start service. No desktop IP address required.
+
+  NOTE: Keep this file ASCII-only. Windows PowerShell 5.1 without a UTF-8 BOM
+  mis-parses Unicode punctuation and breaks Write-Host strings.
 #>
 param(
   [string]$InstallDir = "$env:ProgramFiles\BMW-ENET-Agent",
@@ -16,7 +19,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 Write-Host ""
-Write-Host "=== BMW ENET Agent — Laptop setup ===" -ForegroundColor Cyan
+Write-Host "=== BMW ENET Agent - Laptop setup ===" -ForegroundColor Cyan
 Write-Host "This PC stays near the car. The ENET cable plugs in here."
 Write-Host "The desktop is found automatically on your Wi-Fi/Ethernet."
 Write-Host ""
@@ -74,8 +77,8 @@ if (-not $SkipService -and (Test-Path (Join-Path $InstallDir "enet-agent.exe")))
 
 Write-Host ""
 Write-Host "Done." -ForegroundColor Green
-Write-Host "1) Plug ENET into the OBD port and this laptop"
-Write-Host "2) Turn ignition ON / wake the car"
-Write-Host "3) On the desktop dashboard, wait for Laptop + Vehicle lights to turn green"
-Write-Host "4) Open ISTA / E-Sys on the desktop"
+Write-Host '1. Plug ENET into the OBD port and this laptop'
+Write-Host '2. Turn ignition ON / wake the car'
+Write-Host '3. On the desktop dashboard, wait for Laptop + Vehicle lights to turn green'
+Write-Host '4. Open ISTA / E-Sys on the desktop'
 Write-Host ""
