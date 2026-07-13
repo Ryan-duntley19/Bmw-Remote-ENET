@@ -26,6 +26,8 @@ You need **one file**. No Rust. No `.bat` scripts.
 5. **Host:** browser opens to http://127.0.0.1:47901/ — copy the **pair code**  
    **Client:** paste that pair code (or leave blank if both PCs are on the same Wi‑Fi)
 
+Files install under `C:\BMW-ENET\Host` or `C:\BMW-ENET\Client`.
+
 Do the same Setup.exe on both PCs (Host on one, Client on the other).
 
 ### Uninstall

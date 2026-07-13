@@ -1,4 +1,4 @@
-//! Windows install steps: copy files, firewall, service, config, shortcuts.
+//! Windows install steps: copy files, firewall, auto-start, shortcuts.
 
 use crate::download::{PreparedPackage, Role};
 use anyhow::{bail, Context, Result};
@@ -26,10 +26,13 @@ pub struct InstallResult {
 }
 
 pub fn default_install_dir(role: Role) -> PathBuf {
+    // Avoid "Program Files" spaces — they break sc.exe binPath and confuse users.
     #[cfg(windows)]
     {
-        let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".into());
-        PathBuf::from(pf).join(role.install_dir_name())
+        PathBuf::from(r"C:\BMW-ENET").join(match role {
+            Role::Host => "Host",
+            Role::Client => "Client",
+        })
     }
     #[cfg(not(windows))]
     {
@@ -118,8 +121,10 @@ pub fn run_install(
     #[cfg(windows)]
     {
         configure_firewall(req.role, progress)?;
+        // Remove any broken SCM service from older Setup builds (error 87).
+        remove_legacy_scm_service(req.role, progress);
         if req.start_service {
-            install_and_start_service(
+            install_autostart(
                 req.role,
                 &install_dir,
                 &config_path,
@@ -130,7 +135,9 @@ pub fn run_install(
         if req.role == Role::Host {
             create_desktop_shortcut(&install_dir, progress)?;
         }
+        // Give the gateway a moment to bind :47901 before opening the browser.
         if req.open_dashboard && req.role == Role::Host {
+            std::thread::sleep(std::time::Duration::from_secs(2));
             let _ = Command::new("cmd")
                 .args(["/C", "start", "", "http://127.0.0.1:47901/"])
                 .status();
@@ -246,67 +253,151 @@ fn configure_firewall(role: Role, progress: &ProgressFn) -> Result<()> {
 }
 
 #[cfg(windows)]
-fn install_and_start_service(
+fn remove_legacy_scm_service(role: Role, progress: &ProgressFn) {
+    let name = role.service_name();
+    let _ = Command::new("sc.exe").args(["stop", name]).output();
+    let del = Command::new("sc.exe").args(["delete", name]).output();
+    if del
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("SUCCESS"))
+        .unwrap_or(false)
+    {
+        progress(0, 0, &format!("Removed old broken Windows service {name}"));
+    }
+}
+
+#[cfg(windows)]
+fn install_autostart(
     role: Role,
     install_dir: &Path,
     config_path: &Path,
     pair_code: &str,
     progress: &ProgressFn,
 ) -> Result<()> {
-    progress(0, 0, "Installing Windows service...");
-    let name = role.service_name();
+    progress(0, 0, "Configuring auto-start + launching now...");
     let exe = install_dir.join(role.main_exe());
-    let mut bin_path = format!("\"{}\" --config \"{}\"", exe.display(), config_path.display());
+    if !exe.is_file() {
+        bail!("Missing {}", exe.display());
+    }
+
+    let mut args = format!("--config \"{}\"", config_path.display());
     if role == Role::Client && !pair_code.trim().is_empty() {
-        bin_path.push_str(&format!(" --pair-code {}", pair_code.trim()));
+        args.push_str(&format!(" --pair-code {}", pair_code.trim()));
     }
 
-    let _ = Command::new("sc.exe").args(["stop", name]).status();
-    let _ = Command::new("sc.exe").args(["delete", name]).status();
+    let task_name = match role {
+        Role::Host => "BMW-ENET-Host",
+        Role::Client => "BMW-ENET-Client",
+    };
 
-    let create = Command::new("sc.exe")
-        .args(["create", name, &format!("binPath= {bin_path}"), "start=", "auto"])
+    // Scheduled Task at startup (works for normal console apps; SCM services need a service main).
+    let script = format!(
+        r#"
+$ErrorActionPreference = 'Stop'
+$taskName = '{task}'
+Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+$action = New-ScheduledTaskAction -Execute '{exe}' -Argument '{args}' -WorkingDirectory '{wd}'
+$trigger = New-ScheduledTaskTrigger -AtStartup
+$principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+Start-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+"#,
+        task = task_name,
+        exe = exe.display(),
+        args = args.replace('\'', "''"),
+        wd = install_dir.display(),
+    );
+
+    let status = Command::new("powershell")
+        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &script])
         .status()
-        .context("sc create")?;
-    if !create.success() {
-        bail!("Failed to create service {name}. Try running Setup as Administrator.");
-    }
-    let _ = Command::new("sc.exe")
-        .args(["description", name, role.service_display()])
-        .status();
-    let start = Command::new("sc.exe").args(["start", name]).status()?;
-    if start.success() {
-        progress(0, 0, &format!("Service {name} started"));
-    } else {
+        .context("register scheduled task")?;
+    if !status.success() {
         progress(
             0,
             0,
-            &format!("Service created but not started — run: sc start {name}"),
+            "Scheduled task registration failed — will still try to start the app now",
         );
+    } else {
+        progress(0, 0, &format!("Auto-start task registered: {task_name}"));
     }
+
+    // Start immediately (do not rely only on the task).
+    start_now(&exe, config_path, role, pair_code, install_dir, progress)?;
     Ok(())
+}
+
+#[cfg(windows)]
+fn start_now(
+    exe: &Path,
+    config_path: &Path,
+    role: Role,
+    pair_code: &str,
+    install_dir: &Path,
+    progress: &ProgressFn,
+) -> Result<()> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+
+    let mut cmd = Command::new(exe);
+    cmd.arg("--config")
+        .arg(config_path)
+        .current_dir(install_dir)
+        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS);
+    if role == Role::Client && !pair_code.trim().is_empty() {
+        cmd.arg("--pair-code").arg(pair_code.trim());
+    }
+    match cmd.spawn() {
+        Ok(_) => {
+            progress(0, 0, &format!("{} started", role.main_exe()));
+            Ok(())
+        }
+        Err(e) => {
+            bail!("Failed to start {}: {e}", exe.display());
+        }
+    }
 }
 
 #[cfg(windows)]
 fn create_desktop_shortcut(install_dir: &Path, progress: &ProgressFn) -> Result<()> {
     let gui = install_dir.join("enet-gui.exe");
-    if !gui.is_file() {
-        return Ok(());
-    }
+    let target = if gui.is_file() {
+        gui
+    } else {
+        // Fall back to opening the dashboard URL via a tiny cmd shortcut target.
+        PathBuf::from(r"C:\Windows\System32\cmd.exe")
+    };
     progress(0, 0, "Creating desktop shortcut...");
+    let (target_path, args, workdir) = if install_dir.join("enet-gui.exe").is_file() {
+        (
+            install_dir.join("enet-gui.exe").display().to_string(),
+            String::new(),
+            install_dir.display().to_string(),
+        )
+    } else {
+        (
+            target.display().to_string(),
+            "/C start http://127.0.0.1:47901/".into(),
+            install_dir.display().to_string(),
+        )
+    };
     let script = format!(
         r#"
 $desktop = [Environment]::GetFolderPath('Desktop')
 $lnkPath = Join-Path $desktop 'BMW ENET Gateway.lnk'
 $w = New-Object -ComObject WScript.Shell
 $s = $w.CreateShortcut($lnkPath)
-$s.TargetPath = '{}'
-$s.WorkingDirectory = '{}'
+$s.TargetPath = '{target}'
+$s.Arguments = '{args}'
+$s.WorkingDirectory = '{wd}'
 $s.Description = 'BMW ENET Gateway dashboard'
 $s.Save()
 "#,
-        gui.display(),
-        install_dir.display()
+        target = target_path,
+        args = args.replace('\'', "''"),
+        wd = workdir,
     );
     let _ = Command::new("powershell")
         .args(["-NoProfile", "-Command", &script])

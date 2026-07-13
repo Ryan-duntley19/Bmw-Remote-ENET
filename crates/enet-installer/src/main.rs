@@ -269,7 +269,10 @@ impl eframe::App for SetupApp {
                     ui.text_edit_singleline(&mut self.password);
                     ui.add_space(6.0);
 
-                    ui.checkbox(&mut self.start_service, "Install and start Windows service (auto-start)");
+                    ui.checkbox(
+                        &mut self.start_service,
+                        "Start now and auto-start at boot (recommended)",
+                    );
                     if self.role == Role::Host {
                         ui.checkbox(
                             &mut self.open_dashboard,
