@@ -96,13 +96,14 @@ impl FlashSafetyChecker {
         if !vehicle.awake {
             reasons.push("Vehicle appears asleep (no recent ENET activity)".into());
         }
-        if stats.rtt_p99_ms > self.thresholds.max_rtt_p99_ms {
+        if stats.rtt_p99_ms > self.thresholds.max_rtt_p99_ms && stats.rtt_ms > 0.0 {
             reasons.push(format!(
                 "RTT p99 {:.2} ms exceeds limit {:.2} ms",
                 stats.rtt_p99_ms, self.thresholds.max_rtt_p99_ms
             ));
         }
-        if stats.loss_rate > self.thresholds.max_loss_rate {
+        // Ignore tiny sample windows so a single gap right after connect doesn't trip flash safety.
+        if stats.loss_rate > self.thresholds.max_loss_rate && stats.rx_pps + stats.tx_pps > 0.5 {
             reasons.push(format!(
                 "Packet loss {:.4}% exceeds limit {:.4}%",
                 stats.loss_rate * 100.0,

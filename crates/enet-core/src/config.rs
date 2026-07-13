@@ -175,7 +175,7 @@ impl Default for GatewayConfig {
             auto_start: true,
             reconnect_delay_ms: 500,
             reconnect_delay_max_ms: 10_000,
-            keepalive_interval_ms: 1000,
+            keepalive_interval_ms: 500,
             peer_timeout_ms: 5000,
             log_level: LogLevel::Info,
             log_dir: PathBuf::from("logs"),

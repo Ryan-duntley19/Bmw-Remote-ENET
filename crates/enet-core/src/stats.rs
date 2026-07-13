@@ -7,6 +7,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// Ignore sequence jumps larger than this — treat as peer resync, not loss.
+const MAX_PLAUSIBLE_GAP: u64 = 64;
+/// Keep a short RTT history so Wi‑Fi sleep spikes don't dominate forever.
+const RTT_SAMPLE_CAP: usize = 48;
+/// Drop absurd RTT samples (clock skew / stalled reply).
+const MAX_PLAUSIBLE_RTT_MS: f64 = 2_000.0;
+
 /// Thread-safe packet counters and RTT/loss estimators.
 #[derive(Debug, Default)]
 pub struct PacketStats {
@@ -24,20 +31,26 @@ pub struct PacketStats {
 #[derive(Debug)]
 struct StatsInner {
     rtt_samples_ms: VecDeque<f64>,
+    last_rtt_ms: f64,
     window_start: Instant,
     window_tx: u64,
     window_rx: u64,
+    /// Gaps observed inside the current rate window (for flash-safety loss %).
+    window_loss: u64,
     last_rx_seq: Option<u64>,
+    /// Lifetime gaps (diagnostics only).
     expected_loss: u64,
 }
 
 impl Default for StatsInner {
     fn default() -> Self {
         Self {
-            rtt_samples_ms: VecDeque::with_capacity(256),
+            rtt_samples_ms: VecDeque::with_capacity(RTT_SAMPLE_CAP),
+            last_rtt_ms: 0.0,
             window_start: Instant::now(),
             window_tx: 0,
             window_rx: 0,
+            window_loss: 0,
             last_rx_seq: None,
             expected_loss: 0,
         }
@@ -77,7 +90,7 @@ pub struct StatsSnapshot {
     pub rtt_p50_ms: f64,
     /// RTT p99 ms.
     pub rtt_p99_ms: f64,
-    /// Estimated loss rate 0.0–1.0.
+    /// Estimated loss rate 0.0–1.0 (recent window, not lifetime).
     pub loss_rate: f64,
 }
 
@@ -108,9 +121,15 @@ impl PacketStats {
                     inner.last_rx_seq = Some(seq);
                 } else if seq > prev + 1 {
                     let gap = seq - prev - 1;
-                    self.seq_gaps.fetch_add(gap, Ordering::Relaxed);
-                    inner.expected_loss = inner.expected_loss.saturating_add(gap);
-                    inner.last_rx_seq = Some(seq);
+                    if gap > MAX_PLAUSIBLE_GAP {
+                        // Huge jump = new sequence space, not 10k lost packets.
+                        inner.last_rx_seq = Some(seq);
+                    } else {
+                        self.seq_gaps.fetch_add(gap, Ordering::Relaxed);
+                        inner.expected_loss = inner.expected_loss.saturating_add(gap);
+                        inner.window_loss = inner.window_loss.saturating_add(gap);
+                        inner.last_rx_seq = Some(seq);
+                    }
                 } else {
                     inner.last_rx_seq = Some(seq);
                 }
@@ -124,15 +143,20 @@ impl PacketStats {
     pub fn reset_rx_sequence(&self) {
         let mut inner = self.inner.lock();
         inner.last_rx_seq = None;
+        inner.window_loss = 0;
     }
 
     /// Record RTT sample in milliseconds.
     pub fn record_rtt_ms(&self, rtt_ms: f64) {
+        if !(rtt_ms.is_finite() && rtt_ms > 0.0 && rtt_ms <= MAX_PLAUSIBLE_RTT_MS) {
+            return;
+        }
         let mut inner = self.inner.lock();
-        if inner.rtt_samples_ms.len() >= 256 {
+        if inner.rtt_samples_ms.len() >= RTT_SAMPLE_CAP {
             inner.rtt_samples_ms.pop_front();
         }
-        inner.rtt_samples_ms.push_back(rtt_ms.max(0.0));
+        inner.rtt_samples_ms.push_back(rtt_ms);
+        inner.last_rtt_ms = rtt_ms;
     }
 
     /// Increment dropped counter.
@@ -150,6 +174,27 @@ impl PacketStats {
         self.errors.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Lifetime TX packet count.
+    pub fn tx_packets(&self) -> u64 {
+        self.tx_packets.load(Ordering::Relaxed)
+    }
+
+    /// Lifetime RX packet count.
+    pub fn rx_packets(&self) -> u64 {
+        self.rx_packets.load(Ordering::Relaxed)
+    }
+
+    /// Read current quality metrics without resetting the rate window.
+    pub fn peek_quality(&self) -> (f64, f64, f64) {
+        let inner = self.inner.lock();
+        let mut samples: Vec<f64> = inner.rtt_samples_ms.iter().copied().collect();
+        samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let rtt_p99 = percentile(&samples, 0.99);
+        let rx = inner.window_rx.max(1);
+        let loss = inner.window_loss as f64 / (rx as f64 + inner.window_loss as f64);
+        (inner.last_rtt_ms, rtt_p99, loss)
+    }
+
     /// Produce a snapshot, resetting the rate window.
     pub fn snapshot(&self) -> StatsSnapshot {
         let mut inner = self.inner.lock();
@@ -164,15 +209,17 @@ impl PacketStats {
 
         let mut samples: Vec<f64> = inner.rtt_samples_ms.iter().copied().collect();
         samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let rtt_ms = samples.last().copied().unwrap_or(0.0);
+        let rtt_ms = inner.last_rtt_ms;
         let rtt_p50 = percentile(&samples, 0.50);
         let rtt_p99 = percentile(&samples, 0.99);
-        let rx = self.rx_packets.load(Ordering::Relaxed).max(1);
-        let loss_rate = inner.expected_loss as f64 / (rx as f64 + inner.expected_loss as f64);
+        // Recent-window loss — never lifetime (that stuck at 90%+ after any flap).
+        let rx_w = inner.window_rx.max(1);
+        let loss_rate = inner.window_loss as f64 / (rx_w as f64 + inner.window_loss as f64);
 
         inner.window_start = Instant::now();
         inner.window_tx = 0;
         inner.window_rx = 0;
+        inner.window_loss = 0;
 
         StatsSnapshot {
             tx_packets: self.tx_packets.load(Ordering::Relaxed),
@@ -230,6 +277,31 @@ mod tests {
         assert_eq!(snap.seq_gaps, 2);
         assert!(snap.loss_rate > 0.0);
         assert!(snap.rtt_p50_ms > 0.0);
+        assert!((snap.rtt_ms - 2.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn huge_gap_does_not_invent_loss() {
+        let s = PacketStats::new();
+        s.record_rx(100, Some(1));
+        s.record_rx(100, Some(10_000));
+        let snap = s.snapshot();
+        assert_eq!(snap.seq_gaps, 0);
+        assert_eq!(snap.loss_rate, 0.0);
+    }
+
+    #[test]
+    fn loss_is_windowed_not_lifetime() {
+        let s = PacketStats::new();
+        s.record_rx(100, Some(1));
+        s.record_rx(100, Some(4)); // gap 2
+        let first = s.snapshot();
+        assert!(first.loss_rate > 0.0);
+        // Clean window afterward.
+        s.record_rx(100, Some(5));
+        s.record_rx(100, Some(6));
+        let second = s.snapshot();
+        assert_eq!(second.loss_rate, 0.0);
     }
 
     #[test]

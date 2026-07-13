@@ -239,7 +239,15 @@ impl TunnelEngine {
                             let crypto = opts.crypto.as_ref();
                             match TunnelFrame::decode(&buf[..n], crypto) {
                                 Ok(frame) => {
-                                    stats.record_rx(n, Some(frame.header.sequence));
+                                    // Loss % tracks Ethernet data-plane only — control/keepalive
+                                    // flaps were inventing 90%+ "loss" on an otherwise fine tunnel.
+                                    let seq_for_loss =
+                                        if frame.header.frame_type == FrameType::Ethernet {
+                                            Some(frame.header.sequence)
+                                        } else {
+                                            None
+                                        };
+                                    stats.record_rx(n, seq_for_loss);
                                     match frame.header.frame_type {
                                         FrameType::Ethernet => {
                                             if let Err(e) = eth.send(frame.payload).await {
@@ -364,7 +372,7 @@ impl TunnelEngine {
                             let _ = socket.send_to(&pkt, peer).await;
                             stats.record_tx(pkt.len());
                         }
-                        let snap = stats.snapshot();
+                        let (rtt_ms, _rtt_p99, loss_rate) = stats.peek_quality();
                         let st = state.read().clone();
                         let status = ControlPayload::Status {
                             vehicle_link: if opts.role == "agent" {
@@ -378,10 +386,10 @@ impl TunnelEngine {
                                 false
                             },
                             peer_connected: matches!(st.connection, ConnectionState::Connected),
-                            packets_tx: snap.tx_packets,
-                            packets_rx: snap.rx_packets,
-                            loss_rate: snap.loss_rate,
-                            rtt_ms: snap.rtt_ms,
+                            packets_tx: stats.tx_packets(),
+                            packets_rx: stats.rx_packets(),
+                            loss_rate,
+                            rtt_ms,
                         };
                         if let Ok(payload) = status.to_bytes() {
                             let seq = tx_seq.fetch_add(1, Ordering::Relaxed);
