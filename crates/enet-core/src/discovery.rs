@@ -100,6 +100,78 @@ pub fn score_enet_candidate(iface: &InterfaceInfo, preferred_name: &str) -> i32 
     score
 }
 
+/// Best-effort OS check: is this adapter's link/carrier up?
+///
+/// Used by the laptop Client to show “ENET cable plugged” before Npcap capture exists.
+pub fn adapter_link_up(name: &str) -> bool {
+    if name.is_empty() || name == "pending-enet" {
+        return false;
+    }
+    // Cache PowerShell / sysfs probes — status UI polls ~1 Hz.
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    struct Cache {
+        name: String,
+        up: bool,
+        at: Instant,
+    }
+    static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
+    if let Ok(guard) = CACHE.lock() {
+        if let Some(c) = guard.as_ref() {
+            if c.name.eq_ignore_ascii_case(name) && c.at.elapsed() < Duration::from_millis(800) {
+                return c.up;
+            }
+        }
+    }
+    let up = adapter_link_up_uncached(name);
+    if let Ok(mut guard) = CACHE.lock() {
+        *guard = Some(Cache {
+            name: name.to_string(),
+            up,
+            at: Instant::now(),
+        });
+    }
+    up
+}
+
+fn adapter_link_up_uncached(name: &str) -> bool {
+    #[cfg(windows)]
+    {
+        let script = format!(
+            "$a = Get-NetAdapter -Name '{}' -ErrorAction SilentlyContinue; if ($null -eq $a) {{ exit 2 }}; if ($a.Status -eq 'Up') {{ exit 0 }} else {{ exit 1 }}",
+            name.replace('\'', "''")
+        );
+        match std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &script])
+            .status()
+        {
+            Ok(s) if s.success() => return true,
+            Ok(s) if s.code() == Some(1) => return false,
+            _ => {}
+        }
+    }
+    #[cfg(unix)]
+    {
+        let carrier = std::path::Path::new("/sys/class/net")
+            .join(name)
+            .join("carrier");
+        if let Ok(v) = std::fs::read_to_string(&carrier) {
+            return v.trim() == "1";
+        }
+        let oper = std::path::Path::new("/sys/class/net")
+            .join(name)
+            .join("operstate");
+        if let Ok(v) = std::fs::read_to_string(&oper) {
+            return v.trim() == "up";
+        }
+    }
+    detect_candidate_interfaces()
+        .into_iter()
+        .find(|i| i.name.eq_ignore_ascii_case(name))
+        .map(|i| i.is_up)
+        .unwrap_or(false)
+}
+
 /// Pick the best ENET candidate, if any.
 pub fn pick_enet_interface(preferred: &str) -> Option<InterfaceInfo> {
     let mut ifaces = detect_candidate_interfaces();

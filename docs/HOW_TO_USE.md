@@ -37,6 +37,7 @@ Double-click the **BMW ENET Gateway** desktop shortcut, or run `enet-gui`.
 1. On the **Host** UI, copy the **pair code** (example: `BMW-7K2Q`).
 2. On the **laptop**, run Setup → **Client** and paste the code (or leave blank on the same Wi‑Fi).
 3. Leave `enet-agent` / the Client service running.
+4. On the laptop, open **http://127.0.0.1:47903/** (or the **BMW ENET Client Status** shortcut) for Desktop / ENET / Vehicle lights.
 
 ### Desktop on Ethernet, laptop on Wi‑Fi
 
@@ -50,6 +51,16 @@ cd C:\BMW-ENET\Client
 ```
 
 Also match passwords on both PCs (or clear `password` on both). Guest / AP-isolation Wi‑Fi will not work.
+
+### Lower latency (Wi‑Fi laptop)
+
+| Tip | Why |
+|-----|-----|
+| Stay on **5 GHz**, close to the AP | Cuts RTT / loss vs 2.4 GHz |
+| Run **one** `enet-agent` only | Two Clients invent fake packet loss |
+| Prefer laptop **Ethernet** to the router when flashing | Flash gate wants p99 &lt; 20 ms |
+| Disable Wi‑Fi power saving / “battery saver” | Stops radio sleep spikes |
+| Empty password / `require_crypto = false` on LAN | Tiny CPU/wire savings |
 
 Different networks (not the same router): see [REMOTE.md](REMOTE.md).
 

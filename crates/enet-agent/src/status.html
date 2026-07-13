@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>BMW ENET Client</title>
+<style>
+  :root {
+    --bg: #0f1216;
+    --card: #1c222b;
+    --border: #2a3340;
+    --text: #e8edf4;
+    --muted: #8b9aab;
+    --ok: #2fbf71;
+    --warn: #e0a03a;
+    --off: #5a6573;
+    --accent: #3d9bb8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: "Segoe UI", "IBM Plex Sans", system-ui, sans-serif;
+    background: radial-gradient(1200px 600px at 20% -10%, #1a3038 0%, var(--bg) 55%);
+    color: var(--text);
+    padding: 1.25rem;
+  }
+  h1 { margin: 0 0 0.25rem; font-size: 1.35rem; letter-spacing: 0.02em; }
+  .sub { color: var(--muted); margin-bottom: 1.25rem; font-size: 0.92rem; }
+  .row {
+    display: grid;
+    gap: 0.75rem;
+    max-width: 520px;
+  }
+  .card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem 1.1rem;
+  }
+  .label { font-weight: 650; }
+  .detail { color: var(--muted); font-size: 0.85rem; margin-top: 0.2rem; }
+  .badge {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    padding: 0.35rem 0.65rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--off);
+  }
+  .badge.ok { color: #0d2a18; background: var(--ok); border-color: transparent; }
+  .badge.warn { color: #2a1c05; background: var(--warn); border-color: transparent; }
+  .badge.off { background: #12161c; }
+  .metrics {
+    margin-top: 1rem;
+    max-width: 520px;
+    color: var(--muted);
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+  .hint {
+    margin-top: 1.25rem;
+    max-width: 520px;
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: #141a22;
+    color: var(--muted);
+    font-size: 0.88rem;
+  }
+  .hint strong { color: var(--accent); }
+  code { font-family: Consolas, monospace; font-size: 0.82rem; color: var(--text); }
+</style>
+</head>
+<body>
+  <h1>BMW ENET Client</h1>
+  <div class="sub" id="sub">Laptop status · waiting…</div>
+  <div class="row">
+    <div class="card">
+      <div>
+        <div class="label">Desktop</div>
+        <div class="detail" id="desk-d">—</div>
+      </div>
+      <span class="badge off" id="desk-b">—</span>
+    </div>
+    <div class="card">
+      <div>
+        <div class="label">ENET cable</div>
+        <div class="detail" id="enet-d">—</div>
+      </div>
+      <span class="badge off" id="enet-b">—</span>
+    </div>
+    <div class="card">
+      <div>
+        <div class="label">Vehicle</div>
+        <div class="detail" id="veh-d">—</div>
+      </div>
+      <span class="badge off" id="veh-b">—</span>
+    </div>
+  </div>
+  <div class="metrics" id="metrics"></div>
+  <div class="hint">
+    <strong>Tomorrow’s test:</strong> plug ENET into the car + laptop, turn ignition ON.
+    ENET cable turns green when the USB/Ethernet adapter link is up.
+    Vehicle awake needs car traffic (Npcap for full ISTA forwarding).
+  </div>
+<script>
+function setBadge(el, text, kind) {
+  el.textContent = text;
+  el.className = 'badge ' + kind;
+}
+async function refresh() {
+  try {
+    const s = await fetch('/api/status').then(r => r.json());
+    document.getElementById('sub').textContent =
+      'Pair ' + (s.pair_code || '—') + ' · v' + (s.version || '?');
+
+    const desk = !!s.desktop_connected;
+    setBadge(document.getElementById('desk-b'), desk ? 'CONNECTED' : 'WAITING', desk ? 'ok' : 'off');
+    document.getElementById('desk-d').textContent = desk
+      ? (s.desktop_peer || 'Tunnel up')
+      : 'Waiting for Host on the desktop';
+
+    const enet = !!s.enet_link;
+    setBadge(document.getElementById('enet-b'), enet ? 'PLUGGED' : 'UNPLUGGED', enet ? 'ok' : 'off');
+    document.getElementById('enet-d').textContent = s.enet_interface
+      ? (enet ? ('Link up · ' + s.enet_interface) : ('No link · ' + s.enet_interface))
+      : 'No ENET adapter detected yet';
+
+    const awake = !!s.vehicle_awake;
+    setBadge(document.getElementById('veh-b'), awake ? 'AWAKE' : 'SLEEP', awake ? 'warn' : 'off');
+    document.getElementById('veh-d').textContent = awake
+      ? 'Car answering / traffic seen'
+      : 'Ignition ON after ENET is plugged';
+
+    const rtt = (s.rtt_ms || 0).toFixed(1);
+    const loss = ((s.loss_rate || 0) * 100).toFixed(2);
+    document.getElementById('metrics').textContent =
+      'RTT ' + rtt + ' ms · loss ' + loss + '% · ' + (s.friendly || '');
+  } catch (e) {
+    document.getElementById('sub').textContent = 'Status unavailable — is enet-agent running?';
+  }
+}
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>

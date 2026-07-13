@@ -40,6 +40,15 @@ Integration unit test `tunnel_forwards_ethernet_frame` asserts end-to-end frame 
 | Loss | Sensitive to interference |
 | Flashing | Prefer wired; GUI will warn |
 
+### Practical ways to lower latency
+
+1. **One Client process** — duplicate `enet-agent` instances make loss look catastrophic.
+2. **5 GHz / strong signal** — move closer; avoid microwave / DFS flaps.
+3. **Wire the laptop** to the same switch as the desktop when coding/flashing.
+4. **UDP buffers** — tunnel sets ~4 MB send/recv buffers to absorb Wi‑Fi jitter.
+5. **No crypto on trusted LAN** — `require_crypto = false` with empty password.
+6. **WireGuard** only when not on the same router — still usually better than relay/TCP.
+
 ## Flash-safety defaults
 
 - RTT p99 &lt; 20 ms

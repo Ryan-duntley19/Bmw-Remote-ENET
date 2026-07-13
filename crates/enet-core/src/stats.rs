@@ -103,14 +103,27 @@ impl PacketStats {
         inner.window_rx = inner.window_rx.saturating_add(1);
         if let Some(seq) = sequence {
             if let Some(prev) = inner.last_rx_seq {
-                if seq > prev + 1 {
+                if seq <= prev {
+                    // Peer restarted / NAT rebound / second agent — resync, don't invent loss.
+                    inner.last_rx_seq = Some(seq);
+                } else if seq > prev + 1 {
                     let gap = seq - prev - 1;
                     self.seq_gaps.fetch_add(gap, Ordering::Relaxed);
                     inner.expected_loss = inner.expected_loss.saturating_add(gap);
+                    inner.last_rx_seq = Some(seq);
+                } else {
+                    inner.last_rx_seq = Some(seq);
                 }
+            } else {
+                inner.last_rx_seq = Some(seq);
             }
-            inner.last_rx_seq = Some(seq);
         }
+    }
+
+    /// Forget the last RX sequence (call when the tunnel peer identity changes).
+    pub fn reset_rx_sequence(&self) {
+        let mut inner = self.inner.lock();
+        inner.last_rx_seq = None;
     }
 
     /// Record RTT sample in milliseconds.

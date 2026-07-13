@@ -94,6 +94,12 @@ impl TunnelEngine {
     pub async fn run(self) -> anyhow::Result<TunnelHandle> {
         let socket = Arc::new(UdpSocket::bind(self.opts.bind).await?);
         let _ = socket.set_broadcast(true);
+        // Larger buffers help Wi‑Fi↔LAN jitter absorb bursts (ISTA/coding traffic).
+        {
+            let sock_ref = socket2::SockRef::from(socket.as_ref());
+            let _ = sock_ref.set_recv_buffer_size(4 * 1024 * 1024);
+            let _ = sock_ref.set_send_buffer_size(4 * 1024 * 1024);
+        }
         info!(bind = %self.opts.bind, role = %self.opts.role, "tunnel UDP bound");
 
         let running = Arc::new(AtomicBool::new(true));
@@ -210,6 +216,7 @@ impl TunnelEngine {
                                     info!(%src, "learned tunnel peer");
                                     *slot = Some(src);
                                     let _ = peer_watch_tx.send(Some(src));
+                                    stats.reset_rx_sequence();
                                     let mut st = state.write();
                                     st.peer_endpoint = Some(src.to_string());
                                 } else if let Some(existing) = *slot {
@@ -217,6 +224,10 @@ impl TunnelEngine {
                                         warn!(%src, expected = %existing, "unexpected peer ip");
                                         stats.record_drop();
                                         continue;
+                                    }
+                                    if existing != src {
+                                        // NAT port change or second Client — resync loss tracking.
+                                        stats.reset_rx_sequence();
                                     }
                                     *slot = Some(src);
                                     let mut st = state.write();

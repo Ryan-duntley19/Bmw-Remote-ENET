@@ -24,6 +24,9 @@ pub const DEFAULT_TUNNEL_PORT: u16 = 47900;
 /// Default control / status HTTP API port on the desktop.
 pub const DEFAULT_API_PORT: u16 = 47901;
 
+/// Default laptop Client status page port (avoids colliding with Host :47901).
+pub const DEFAULT_AGENT_API_PORT: u16 = 47903;
+
 /// UDP port for LAN gateway auto-discovery beacons.
 pub const DEFAULT_DISCOVERY_PORT: u16 = 47902;
 

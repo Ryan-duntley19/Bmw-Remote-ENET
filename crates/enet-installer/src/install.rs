@@ -133,13 +133,25 @@ pub fn run_install(
             )?;
         }
         if req.role == Role::Host {
-            create_desktop_shortcut(&install_dir, progress)?;
+            create_desktop_shortcut(&install_dir, "BMW ENET Gateway", "http://127.0.0.1:47901/", progress)?;
+        } else {
+            create_desktop_shortcut(
+                &install_dir,
+                "BMW ENET Client Status",
+                "http://127.0.0.1:47903/",
+                progress,
+            )?;
         }
-        // Give the gateway a moment to bind :47901 before opening the browser.
-        if req.open_dashboard && req.role == Role::Host {
+        // Give the process a moment to bind the status port before opening the browser.
+        if req.open_dashboard {
             std::thread::sleep(std::time::Duration::from_secs(2));
+            let url = if req.role == Role::Host {
+                "http://127.0.0.1:47901/"
+            } else {
+                "http://127.0.0.1:47903/"
+            };
             let _ = Command::new("cmd")
-                .args(["/C", "start", "", "http://127.0.0.1:47901/"])
+                .args(["/C", "start", "", url])
                 .status();
         }
 
@@ -152,7 +164,7 @@ pub fn run_install(
             dashboard_url: if req.role == Role::Host {
                 Some("http://127.0.0.1:47901/".into())
             } else {
-                None
+                Some("http://127.0.0.1:47903/".into())
             },
         })
     }
@@ -193,7 +205,7 @@ manage_firewall = true
 role = "agent"
 network_mode = "lan"
 tunnel_port = 47900
-api_port = 47901
+api_port = 47903
 discovery_port = 47902
 auto_discover = true
 pair_code = "{}"
@@ -361,43 +373,43 @@ fn start_now(
 }
 
 #[cfg(windows)]
-fn create_desktop_shortcut(install_dir: &Path, progress: &ProgressFn) -> Result<()> {
+fn create_desktop_shortcut(
+    install_dir: &Path,
+    title: &str,
+    url: &str,
+    progress: &ProgressFn,
+) -> Result<()> {
     let gui = install_dir.join("enet-gui.exe");
-    let target = if gui.is_file() {
-        gui
-    } else {
-        // Fall back to opening the dashboard URL via a tiny cmd shortcut target.
-        PathBuf::from(r"C:\Windows\System32\cmd.exe")
-    };
-    progress(0, 0, "Creating desktop shortcut...");
-    let (target_path, args, workdir) = if install_dir.join("enet-gui.exe").is_file() {
+    progress(0, 0, &format!("Creating desktop shortcut ({title})..."));
+    let (target_path, args, workdir) = if gui.is_file() && title.contains("Gateway") {
         (
-            install_dir.join("enet-gui.exe").display().to_string(),
+            gui.display().to_string(),
             String::new(),
             install_dir.display().to_string(),
         )
     } else {
         (
-            target.display().to_string(),
-            "/C start http://127.0.0.1:47901/".into(),
+            r"C:\Windows\System32\cmd.exe".into(),
+            format!("/C start {url}"),
             install_dir.display().to_string(),
         )
     };
     let script = format!(
         r#"
 $desktop = [Environment]::GetFolderPath('Desktop')
-$lnkPath = Join-Path $desktop 'BMW ENET Gateway.lnk'
+$lnkPath = Join-Path $desktop '{title}.lnk'
 $w = New-Object -ComObject WScript.Shell
 $s = $w.CreateShortcut($lnkPath)
 $s.TargetPath = '{target}'
 $s.Arguments = '{args}'
 $s.WorkingDirectory = '{wd}'
-$s.Description = 'BMW ENET Gateway dashboard'
+$s.Description = '{title}'
 $s.Save()
 "#,
-        target = target_path,
+        title = title.replace('\'', "''"),
+        target = target_path.replace('\'', "''"),
         args = args.replace('\'', "''"),
-        wd = workdir,
+        wd = workdir.replace('\'', "''"),
     );
     let _ = Command::new("powershell")
         .args(["-NoProfile", "-Command", &script])
