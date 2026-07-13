@@ -1,0 +1,21 @@
+# Easy defaults for the laptop agent.
+# Same LAN:   enet-setup agent
+# Different networks: enet-setup agent --remote-relay YOUR_VPS:47910 --pair-code BMW-XXXX --yes
+
+role = "agent"
+network_mode = "lan"
+tunnel_port = 47900
+api_port = 47901
+discovery_port = 47902
+auto_discover = true
+pair_code = ""
+password = ""
+require_crypto = false
+relay_url = ""
+auto_start = true
+setup_complete = false
+allowed_cidrs = ["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12", "10.66.0.0/24", "100.64.0.0/10"]
+enet_interface = ""
+log_level = "info"
+log_dir = "logs"
+manage_firewall = true

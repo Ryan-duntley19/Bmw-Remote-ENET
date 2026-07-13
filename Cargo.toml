@@ -1,0 +1,74 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/enet-protocol",
+    "crates/enet-core",
+    "crates/enet-tunnel",
+    "crates/enet-agent",
+    "crates/enet-gateway",
+    "crates/enet-gui",
+    "crates/enet-sim",
+    "crates/enet-setup",
+    "crates/enet-relay",
+    "crates/enet-installer",
+]
+default-members = [
+    "crates/enet-protocol",
+    "crates/enet-core",
+    "crates/enet-tunnel",
+    "crates/enet-agent",
+    "crates/enet-gateway",
+    "crates/enet-sim",
+    "crates/enet-setup",
+    "crates/enet-relay",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["BMW ENET Gateway Contributors"]
+repository = "https://github.com/Ryan-duntley19/test"
+rust-version = "1.75"
+
+[workspace.dependencies]
+enet-protocol = { path = "crates/enet-protocol" }
+enet-core = { path = "crates/enet-core" }
+enet-tunnel = { path = "crates/enet-tunnel" }
+
+anyhow = "1"
+thiserror = "2"
+bytes = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+clap = { version = "4", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+parking_lot = "0.12"
+dashmap = "6"
+socket2 = { version = "0.5", features = ["all"] }
+chacha20poly1305 = "0.10"
+rand = "0.8"
+sha2 = "0.10"
+hex = "0.4"
+uuid = { version = "1", features = ["v4", "serde"] }
+futures = "0.3"
+async-trait = "0.1"
+sysinfo = "0.33"
+hostname = "0.4"
+tempfile = "3"
+criterion = "0.5"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+strip = true
+panic = "abort"
+
+[profile.bench]
+inherits = "release"

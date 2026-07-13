@@ -1,0 +1,28 @@
+[package]
+name = "enet-installer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "BMW ENET Gateway Windows setup wizard (Host or Client)"
+publish = false
+
+[[bin]]
+name = "BMW-ENET-Setup"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+eframe = { version = "0.30", default-features = true }
+egui = "0.30"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+sha2 = { workspace = true }
+hex = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"

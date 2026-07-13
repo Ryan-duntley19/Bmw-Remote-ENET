@@ -1,0 +1,22 @@
+[package]
+name = "enet-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Laptop-side BMW ENET tunnel agent"
+
+[[bin]]
+name = "enet-agent"
+path = "src/main.rs"
+
+[dependencies]
+enet-protocol = { workspace = true }
+enet-core = { workspace = true }
+enet-tunnel = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+clap = { workspace = true }
+bytes = { workspace = true }
+async-trait = { workspace = true }
+serde_json = { workspace = true }

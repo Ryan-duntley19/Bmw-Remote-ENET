@@ -1,0 +1,19 @@
+[package]
+name = "enet-setup"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Friendly first-run setup wizard for BMW ENET Gateway"
+
+[[bin]]
+name = "enet-setup"
+path = "src/main.rs"
+
+[dependencies]
+enet-core = { workspace = true }
+enet-protocol = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+hostname = { workspace = true }

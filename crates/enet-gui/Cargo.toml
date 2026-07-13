@@ -1,0 +1,23 @@
+[package]
+name = "enet-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "BMW ENET Gateway desktop GUI"
+
+[[bin]]
+name = "enet-gui"
+path = "src/main.rs"
+
+[dependencies]
+enet-protocol = { workspace = true }
+enet-core = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+eframe = { version = "0.30", default-features = true }
+egui = "0.30"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
+chrono = { workspace = true }
+tracing = { workspace = true }
+clap = { workspace = true }

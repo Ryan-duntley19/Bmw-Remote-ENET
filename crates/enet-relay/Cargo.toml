@@ -1,0 +1,22 @@
+[package]
+name = "enet-relay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Internet relay for BMW ENET gateway when PCs are on different networks"
+
+[[bin]]
+name = "enet-relay"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+bytes = { workspace = true }
+clap = { workspace = true }
+enet-protocol = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

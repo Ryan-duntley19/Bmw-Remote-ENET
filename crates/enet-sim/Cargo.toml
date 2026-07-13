@@ -1,0 +1,26 @@
+[package]
+name = "enet-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Simulated BMW ENET traffic generator for tests"
+
+[[bin]]
+name = "enet-sim"
+path = "src/main.rs"
+
+[dependencies]
+enet-protocol = { workspace = true }
+enet-core = { workspace = true }
+enet-tunnel = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }
+bytes = { workspace = true }
+rand = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
