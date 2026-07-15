@@ -1,5 +1,5 @@
 # BMW ENET Remote Gateway
-
+DO NOT DOWNLOAD STILL IN TESTING IT WILL BREAK YOUR CAR IF YOU TEST IT OUT
 Connect your **desktop** (ISTA / E-Sys) to your BMW while the **ENET cable** stays on a **laptop** near the car.
 
 Works on the **same Wi-Fi** *or* on **different networks** (relay / WireGuard).
