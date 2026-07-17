@@ -92,6 +92,11 @@ impl TunnelEngine {
 
     /// Bind UDP and run until stopped.
     pub async fn run(self) -> anyhow::Result<TunnelHandle> {
+        if self.opts.require_crypto && self.opts.crypto.is_none() {
+            anyhow::bail!(
+                "require_crypto is set but no password is configured — set the same password on both PCs"
+            );
+        }
         let socket = Arc::new(UdpSocket::bind(self.opts.bind).await?);
         let _ = socket.set_broadcast(true);
         // Larger buffers help Wi‑Fi↔LAN jitter absorb bursts (ISTA/coding traffic).
@@ -273,6 +278,16 @@ impl TunnelEngine {
                                 }
                             }
                             *last_peer_rx.write() = Instant::now();
+
+                            // Enforce encryption: with require_crypto, plaintext
+                            // frames are dropped instead of silently accepted.
+                            if opts.require_crypto
+                                && !TunnelFrame::is_encrypted_raw(&buf[..n]).unwrap_or(false)
+                            {
+                                warn!(%src, "dropping plaintext frame (require_crypto)");
+                                stats.record_drop();
+                                continue;
+                            }
 
                             let crypto = opts.crypto.as_ref();
                             match TunnelFrame::decode(&buf[..n], crypto) {

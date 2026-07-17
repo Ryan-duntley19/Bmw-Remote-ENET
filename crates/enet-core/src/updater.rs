@@ -23,6 +23,8 @@ pub struct UpdateInfo {
     pub asset_name: String,
     /// Release notes (truncated).
     pub notes: String,
+    /// URL of the SHA256SUMS.txt asset when the release ships one.
+    pub checksums_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -115,11 +117,19 @@ pub fn check_latest(
         Some(a) => a,
         None => return Ok(None), // release exists but CI hasn't attached the asset yet
     };
-    let asset_url = if token.is_empty() {
-        asset.browser_download_url.clone()
-    } else {
-        asset.url.clone() // API asset endpoint (works on private repos)
+    let pick_url = |a: &ReleaseAsset| {
+        if token.is_empty() {
+            a.browser_download_url.clone()
+        } else {
+            a.url.clone() // API asset endpoint (works on private repos)
+        }
     };
+    let asset_url = pick_url(asset);
+    let checksums_url = release
+        .assets
+        .iter()
+        .find(|a| a.name.eq_ignore_ascii_case("SHA256SUMS.txt"))
+        .map(pick_url);
     let mut notes = release.body.unwrap_or_default();
     notes.truncate(400);
     Ok(Some(UpdateInfo {
@@ -128,7 +138,54 @@ pub fn check_latest(
         asset_url,
         asset_name: asset_name.to_string(),
         notes,
+        checksums_url,
     }))
+}
+
+/// Verify `bytes` against the release's SHA256SUMS.txt (when present).
+fn verify_checksum(
+    client: &reqwest::blocking::Client,
+    info: &UpdateInfo,
+    bytes: &[u8],
+    token: &str,
+) -> anyhow::Result<()> {
+    let Some(url) = &info.checksums_url else {
+        tracing::warn!("release has no SHA256SUMS.txt — skipping integrity check");
+        return Ok(());
+    };
+    let mut req = client.get(url);
+    if !token.is_empty() {
+        req = req.bearer_auth(token).header("Accept", "application/octet-stream");
+    }
+    let sums = req
+        .send()
+        .context("download SHA256SUMS.txt")?
+        .error_for_status()?
+        .text()
+        .context("read SHA256SUMS.txt")?;
+    let expected = sums
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let hash = parts.next()?;
+            let name = parts.next()?;
+            Some((name.trim_start_matches('*').to_string(), hash.to_lowercase()))
+        })
+        .find(|(name, _)| name.eq_ignore_ascii_case(&info.asset_name))
+        .map(|(_, hash)| hash);
+    let Some(expected) = expected else {
+        bail!("SHA256SUMS.txt has no entry for {}", info.asset_name);
+    };
+    use sha2::{Digest, Sha256};
+    let actual = hex::encode(Sha256::digest(bytes));
+    if actual != expected {
+        bail!(
+            "checksum mismatch for {} (expected {expected}, got {actual}) — refusing to install",
+            info.asset_name
+        );
+    }
+    tracing::info!(asset = %info.asset_name, "update checksum verified");
+    Ok(())
 }
 
 /// Download the update zip and swap files into `install_dir`.
@@ -147,6 +204,9 @@ pub fn download_and_stage(info: &UpdateInfo, install_dir: &Path, token: &str) ->
         .error_for_status()?
         .bytes()
         .context("read update body")?;
+
+    // Integrity check before anything touches the disk.
+    verify_checksum(&client, info, bytes.as_ref(), token)?;
 
     let reader = std::io::Cursor::new(bytes.as_ref());
     let mut zip = zip::ZipArchive::new(reader).context("open update zip")?;

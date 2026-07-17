@@ -11,7 +11,7 @@ use enet_protocol::{ControlPayload, FrameType, TunnelFrame};
 use parking_lot::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncWriteExt;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::{broadcast, Mutex};
@@ -61,6 +61,11 @@ impl RelayTunnelEngine {
 
     /// Connect to relay and forward until stopped.
     pub async fn run(self) -> anyhow::Result<TunnelHandle> {
+        if self.opts.base.require_crypto && self.opts.base.crypto.is_none() {
+            anyhow::bail!(
+                "require_crypto is set but no password is configured — set the same password on both PCs"
+            );
+        }
         let role = if self.opts.base.role == "gateway" {
             RelayRole::Gateway
         } else {
@@ -101,6 +106,7 @@ impl RelayTunnelEngine {
         }
 
         let tx_seq = Arc::new(AtomicU64::new(1));
+        let last_peer_rx = Arc::new(RwLock::new(Instant::now()));
 
         let eth_to_relay = {
             let writer = writer.clone();
@@ -156,12 +162,15 @@ impl RelayTunnelEngine {
 
         let relay_to_eth = {
             let reader = reader.clone();
+            let writer = writer.clone();
             let eth = self.eth.clone();
             let opts = self.opts.base.clone();
             let relay_url = self.opts.relay_url.clone();
             let stats = self.stats.clone();
             let state = self.state.clone();
             let running = running.clone();
+            let last_peer_rx = last_peer_rx.clone();
+            let tx_seq = tx_seq.clone();
             tokio::spawn(async move {
                 while running.load(Ordering::SeqCst) {
                     let pkt = {
@@ -175,6 +184,14 @@ impl RelayTunnelEngine {
                             }
                         }
                     };
+                    // Enforce encryption on the relay path too.
+                    if opts.require_crypto
+                        && !enet_protocol::TunnelFrame::is_encrypted_raw(&pkt).unwrap_or(false)
+                    {
+                        stats.record_drop();
+                        warn!("dropping plaintext relay frame (require_crypto)");
+                        continue;
+                    }
                     match decode_tunnel_frame(&pkt, opts.crypto.as_ref()) {
                         Ok(frame) => {
                             // Only Ethernet frames share one sequence space; control
@@ -185,6 +202,7 @@ impl RelayTunnelEngine {
                                 None
                             };
                             stats.record_rx(pkt.len(), seq);
+                            *last_peer_rx.write() = Instant::now();
                             match frame.header.frame_type {
                                 FrameType::Ethernet => {
                                     if let Err(e) = eth.send(frame.payload).await {
@@ -205,6 +223,29 @@ impl RelayTunnelEngine {
                                     }
                                 }
                                 FrameType::Keepalive => {
+                                    // Payload cookie: 0 = probe (echo it back), 1 = reply.
+                                    let is_reply = frame.payload.len() >= 8
+                                        && frame.payload.as_ref()[7] == 1;
+                                    if !is_reply {
+                                        let seq = tx_seq.fetch_add(1, Ordering::Relaxed);
+                                        let reply = TunnelFrame::keepalive(
+                                            seq,
+                                            frame.header.timestamp_ms_lo,
+                                            1,
+                                        );
+                                        if let Ok(pkt) =
+                                            encode_tunnel_frame(&reply, opts.crypto.as_ref())
+                                        {
+                                            let mut w = writer.lock().await;
+                                            let _ = write_frame_half(&mut w, &pkt).await;
+                                        }
+                                    } else {
+                                        let rtt = rtt_from_ts(frame.header.timestamp_ms_lo);
+                                        if rtt > 0.0 {
+                                            stats.record_rtt_ms(rtt);
+                                            state.write().rtt_local_ms = rtt;
+                                        }
+                                    }
                                     let mut st = state.write();
                                     st.connection = ConnectionState::Connected;
                                     st.laptop_connected = true;
@@ -261,8 +302,11 @@ impl RelayTunnelEngine {
             let tx_seq = tx_seq.clone();
             let state = self.state.clone();
             let eth = self.eth.clone();
+            let last_peer_rx = last_peer_rx.clone();
             tokio::spawn(async move {
                 let interval = Duration::from_millis(opts.keepalive_interval_ms.max(500));
+                // Relay paths ride TCP through the Internet — be generous but finite.
+                let timeout = Duration::from_millis(opts.peer_timeout_ms.max(15_000));
                 while running.load(Ordering::SeqCst) {
                     tokio::time::sleep(interval).await;
                     if opts.role == "agent" {
@@ -282,7 +326,27 @@ impl RelayTunnelEngine {
                         }
                         stats.record_tx(pkt.len());
                     }
+                    // Peer silence → stop claiming Connected.
+                    if last_peer_rx.read().elapsed() > timeout {
+                        let mut st = state.write();
+                        if matches!(st.connection, ConnectionState::Connected) {
+                            warn!("relay peer timeout");
+                            stats.record_reconnect();
+                            st.connection = ConnectionState::Reconnecting;
+                            st.laptop_connected = false;
+                            st.status_message = "Relay peer timeout — waiting".into();
+                            if opts.role == "gateway" {
+                                st.vehicle.link_up = false;
+                                st.vehicle.awake = false;
+                            }
+                        }
+                    }
                 }
+                // Keepalive writer failed → relay TCP is dead.
+                let mut st = state.write();
+                st.connection = ConnectionState::Failed;
+                st.laptop_connected = false;
+                st.status_message = "Relay connection lost".into();
             })
         };
 
@@ -338,4 +402,14 @@ fn now_ms() -> u64 {
 
 fn now_ms_lo() -> u32 {
     (now_ms() & 0xffff_ffff) as u32
+}
+
+/// RTT from an echoed low-32 timestamp; 0.0 when wrapped/implausible.
+fn rtt_from_ts(ts_lo: u32) -> f64 {
+    let now = now_ms_lo();
+    let delta = now.wrapping_sub(ts_lo);
+    if delta == 0 || delta > 60_000 {
+        return 0.0;
+    }
+    delta as f64
 }

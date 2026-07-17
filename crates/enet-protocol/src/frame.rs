@@ -194,6 +194,16 @@ impl TunnelFrame {
         Ok(out.freeze())
     }
 
+    /// Whether the raw datagram carries an encrypted payload (checks header
+    /// flags without decoding). Returns `None` if too short / bad magic.
+    pub fn is_encrypted_raw(data: &[u8]) -> Option<bool> {
+        if data.len() < HEADER_LEN || &data[..4] != b"ENET" {
+            return None;
+        }
+        let flags = u16::from_be_bytes([data[6], data[7]]);
+        Some(flags & FLAG_ENCRYPTED != 0)
+    }
+
     /// Decode from UDP datagram bytes.
     pub fn decode(data: &[u8], crypto: Option<&crate::SessionCrypto>) -> Result<Self> {
         let mut buf = data;

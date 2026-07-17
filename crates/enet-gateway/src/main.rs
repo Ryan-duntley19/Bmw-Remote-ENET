@@ -393,7 +393,8 @@ async fn main() -> anyhow::Result<()> {
                     break;
                 }
                 Err(e) if attempt < 4 => {
-                    warn!(error = %e, attempt, "tunnel start failed — retrying in 2s");
+                    warn!(error = format!("{e:#}"), attempt, "tunnel start failed — retrying in 2s");
+                    eprintln!("  Tunnel start failed: {e:#}");
                     tokio::time::sleep(Duration::from_secs(2)).await;
                 }
                 Err(e) => return Err(e),

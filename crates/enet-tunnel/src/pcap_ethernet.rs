@@ -82,7 +82,9 @@ impl PcapEthernet {
             })?;
 
         let if_name = dev.name.clone();
-        let display = dev
+        // Note: do not name this local `display` — it shadows tracing's
+        // `display` helper inside the info!/warn! macros.
+        let desc_label = dev
             .desc
             .clone()
             .unwrap_or_else(|| if_name.clone());
@@ -160,10 +162,10 @@ impl PcapEthernet {
             })
             .map_err(|e| anyhow::anyhow!("spawn inject thread: {e}"))?;
 
-        info!(%if_name, %display, "Npcap Ethernet port open");
+        info!(%if_name, desc = %desc_label, "Npcap Ethernet port open");
         Ok(Arc::new(Self {
             name: if_name,
-            display,
+            display: desc_label,
             link: AtomicBool::new(true),
             rx: tokio::sync::Mutex::new(rx_cap),
             tx_wire: Mutex::new(Some(tx_inj)),

@@ -77,6 +77,29 @@ jobs:
           RUSTFLAGS: "-C target-feature=+crt-static"
         run: cargo build --release -p enet-installer --features embed
 
+      - name: Integration smoke test (Host + Client, simulate mode)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path smoke/host/config, smoke/client/config | Out-Null
+          $gw = Start-Process -FilePath target/release/enet-gateway.exe -ArgumentList "--config","config/gateway.toml","--simulate","--quiet" -WorkingDirectory smoke/host -PassThru
+          Start-Sleep -Seconds 4
+          $st = Invoke-RestMethod http://127.0.0.1:47901/api/status
+          $pair = $st.pair_code
+          if (-not $pair) { throw "Host did not report a pair code" }
+          $ag = Start-Process -FilePath target/release/enet-agent.exe -ArgumentList "--config","config/agent.toml","--simulate","--peer","127.0.0.1","--pair-code",$pair -WorkingDirectory smoke/client -PassThru
+          $connected = $false
+          foreach ($i in 1..20) {
+            Start-Sleep -Seconds 1
+            try {
+              $s = Invoke-RestMethod http://127.0.0.1:47901/api/status
+              if ($s.state.laptop_connected) { $connected = $true; break }
+            } catch {}
+          }
+          Stop-Process -Id $ag.Id -Force -ErrorAction SilentlyContinue
+          Stop-Process -Id $gw.Id -Force -ErrorAction SilentlyContinue
+          if (-not $connected) { throw "Smoke test failed: Client never connected to Host" }
+          Write-Host "Smoke test OK: tunnel connected"
+
       - name: Stage release files
         shell: pwsh
         run: |
@@ -86,6 +109,14 @@ jobs:
             "dist/BMW-ENET-Host-windows-x64.zip",
             "dist/BMW-ENET-Client-windows-x64.zip"
           ) -DestinationPath dist/BMW-ENET-Windows-Installer.zip -Force
+          # SHA-256 checksums — the self-updater verifies downloads against this file.
+          $lines = @()
+          foreach ($f in @("BMW-ENET-Setup.exe","BMW-ENET-Host-windows-x64.zip","BMW-ENET-Client-windows-x64.zip","BMW-ENET-Windows-Installer.zip")) {
+            $h = (Get-FileHash "dist/$f" -Algorithm SHA256).Hash.ToLower()
+            $lines += "$h  $f"
+          }
+          $lines | Set-Content dist/SHA256SUMS.txt -Encoding ascii
+          Get-Content dist/SHA256SUMS.txt
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -96,6 +127,7 @@ jobs:
             dist/BMW-ENET-Host-windows-x64.zip
             dist/BMW-ENET-Client-windows-x64.zip
             dist/BMW-ENET-Windows-Installer.zip
+            dist/SHA256SUMS.txt
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -106,6 +138,7 @@ jobs:
             dist/BMW-ENET-Host-windows-x64.zip
             dist/BMW-ENET-Client-windows-x64.zip
             dist/BMW-ENET-Windows-Installer.zip
+            dist/SHA256SUMS.txt
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
