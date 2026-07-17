@@ -303,6 +303,8 @@ struct StatusResponse {
     l2_adapter: String,
     /// Newer release version available for install (e.g. "0.1.20").
     update_available: Option<String>,
+    /// Whether new releases auto-install when idle.
+    auto_update: bool,
 }
 
 #[derive(Deserialize)]
@@ -317,6 +319,7 @@ struct SettingsUpdate {
     pair_code: Option<String>,
     setup_complete: Option<bool>,
     auto_discover: Option<bool>,
+    auto_update: Option<bool>,
 }
 
 #[tokio::main]
@@ -367,28 +370,40 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    // Self-update: clean leftovers, then install any newer release before we
-    // bind sockets (nothing is connected yet, so restarting is safe).
+    // Self-update: clean leftovers, then check GitHub on every start.
+    // Auto-install only when auto_update is enabled (safe — nothing connected yet).
     if let Ok(dir) = enet_core::updater::install_dir() {
         enet_core::updater::cleanup_stale(&dir);
-        // Second pass after the old process has fully exited (files unlock).
         let dir2 = dir.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_secs(30)).await;
             enet_core::updater::cleanup_stale(&dir2);
         });
     }
-    if cfg.auto_update {
+    let mut startup_update: Option<enet_core::updater::UpdateInfo> = None;
+    {
         let cfg_upd = cfg.clone();
         let found = tokio::task::spawn_blocking(move || check_update_blocking(&cfg_upd))
             .await
             .unwrap_or(None);
         if let Some(update) = found {
-            eprintln!("  Update found: v{} — installing…", update.version);
-            let token = cfg.update_token.clone();
-            let _ = tokio::task::spawn_blocking(move || apply_update_blocking(&update, &token)).await;
-            // apply_update restarts the process on success; getting here means it failed.
-            eprintln!("  Update failed — continuing with v{}.", env!("CARGO_PKG_VERSION"));
+            if cfg.auto_update {
+                eprintln!("  Update found: v{} — installing…", update.version);
+                let token = cfg.update_token.clone();
+                let _ = tokio::task::spawn_blocking(move || apply_update_blocking(&update, &token)).await;
+                eprintln!("  Update failed — continuing with v{}.", env!("CARGO_PKG_VERSION"));
+            } else {
+                eprintln!(
+                    "  Update available: v{} (auto-update off — use Settings → Check for updates)",
+                    update.version
+                );
+                startup_update = Some(update);
+            }
+        } else {
+            info!(
+                version = env!("CARGO_PKG_VERSION"),
+                "startup update check: already up to date"
+            );
         }
     }
 
@@ -462,6 +477,12 @@ async fn main() -> anyhow::Result<()> {
         if cfg.network_mode == NetworkMode::Relay {
             log.push("info", format!("Relay: {}", cfg.relay_url));
         }
+        if let Some(ref u) = startup_update {
+            log.push("info", format!("Update available: v{}", u.version));
+        }
+    }
+    if let Some(u) = startup_update {
+        *app_state.update_available.write() = Some(u);
     }
 
     // Periodic update check (every 6 h). Auto-installs only while no laptop
@@ -616,6 +637,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/export-logs", post(api_export_logs))
         .route("/api/complete-setup", post(api_complete_setup))
         .route("/api/update", post(api_update))
+        .route("/api/check-update", post(api_check_update))
         .layer(CorsLayer::permissive())
         .with_state(app_state.clone());
 
@@ -831,7 +853,49 @@ async fn api_status(State(state): State<AppState>) -> Json<StatusResponse> {
             .read()
             .as_ref()
             .map(|u| u.version.clone()),
+        auto_update: cfg.auto_update,
     })
+}
+
+async fn api_check_update(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let cfg_now = state.cfg.read().clone();
+    state
+        .activity
+        .write()
+        .push("info", "Checking for updates…");
+    let cfg_chk = cfg_now.clone();
+    let found = tokio::task::spawn_blocking(move || check_update_blocking(&cfg_chk))
+        .await
+        .unwrap_or(None);
+    match found {
+        Some(u) => {
+            let version = u.version.clone();
+            *state.update_available.write() = Some(u);
+            state
+                .activity
+                .write()
+                .push("info", format!("Update available: v{version}"));
+            Json(serde_json::json!({
+                "ok": true,
+                "current": env!("CARGO_PKG_VERSION"),
+                "update_available": version,
+                "message": format!("Update available: v{version}")
+            }))
+        }
+        None => {
+            *state.update_available.write() = None;
+            state.activity.write().push(
+                "info",
+                format!("Already up to date (v{})", env!("CARGO_PKG_VERSION")),
+            );
+            Json(serde_json::json!({
+                "ok": true,
+                "current": env!("CARGO_PKG_VERSION"),
+                "update_available": serde_json::Value::Null,
+                "message": format!("Already up to date (v{})", env!("CARGO_PKG_VERSION"))
+            }))
+        }
+    }
 }
 
 async fn api_update(State(state): State<AppState>) -> Json<serde_json::Value> {
@@ -935,6 +999,9 @@ async fn api_set_settings(
     }
     if let Some(v) = update.auto_discover {
         cfg.auto_discover = v;
+    }
+    if let Some(v) = update.auto_update {
+        cfg.auto_update = v;
     }
     if let Some(level) = update.log_level {
         cfg.log_level = match level.to_lowercase().as_str() {

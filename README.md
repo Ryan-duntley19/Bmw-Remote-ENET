@@ -17,7 +17,7 @@ You need **one file**. No Rust. No `.bat` scripts.
 
 1. Log into GitHub → open **[Releases](https://github.com/Ryan-duntley19/Bmw-Remote-ENET/releases)**  
    *(while private: you must be signed in; when public: anyone can download)*
-2. Download **`BMW-ENET-Setup.exe`** (use **v0.1.25 or newer**)
+2. Download **`BMW-ENET-Setup.exe`** (use **v0.1.26 or newer**)
 3. Double-click it → allow Administrator
 4. Choose a role and click **Install**:
 

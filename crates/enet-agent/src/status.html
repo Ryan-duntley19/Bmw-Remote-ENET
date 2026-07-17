@@ -307,6 +307,22 @@
     </div>
   </div>
 
+  <div class="panel" id="settings-box">
+    <h2>Settings · Updates</h2>
+    <p>
+      Installed <strong id="upd-cur">v?</strong>. Client checks GitHub every time it starts.
+    </p>
+    <label style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem">
+      <input type="checkbox" id="auto-update"/>
+      Automatically install updates when idle
+    </label>
+    <div class="actions">
+      <button id="btn-check-update" class="primary" type="button">Check for updates</button>
+      <button id="btn-update-now2" type="button" style="display:none">Update now</button>
+    </div>
+    <div class="msg" id="upd-msg" aria-live="polite"></div>
+  </div>
+
   <div class="checklist">
     <div class="title">ISTA on the desktop — checklist</div>
     <ol>
@@ -396,6 +412,10 @@ async function refresh() {
       document.getElementById('update-txt').textContent =
         'v' + upd + ' is ready — installs automatically when idle, or update now.';
     }
+    document.getElementById('upd-cur').textContent = 'v' + (s.version || '?');
+    const autoEl = document.getElementById('auto-update');
+    if (autoEl && document.activeElement !== autoEl) autoEl.checked = !!s.auto_update;
+    document.getElementById('btn-update-now2').style.display = upd ? 'inline-block' : 'none';
   } catch (e) {
     document.getElementById('sub').textContent = 'Status unavailable — is enet-agent running?';
   }
@@ -461,22 +481,71 @@ async function autoFind() {
 
 async function updateNow() {
   const btn = document.getElementById('btn-update');
-  btn.disabled = true;
+  if (btn) btn.disabled = true;
+  const msg = document.getElementById('upd-msg');
+  if (msg) { msg.textContent = 'Updating…'; msg.className = 'msg'; }
   showMsg('Updating…');
   try {
     const r = await fetch('/api/update', { method: 'POST' });
     const j = await r.json();
     showMsg(j.message || 'Updating…', j.ok ? 'ok' : 'err');
+    if (msg) {
+      msg.textContent = j.message || 'Updating…';
+      msg.className = 'msg' + (j.ok ? ' ok' : ' err');
+    }
   } catch (e) {
     showMsg('Update failed: ' + e, 'err');
+    if (msg) { msg.textContent = 'Update failed: ' + e; msg.className = 'msg err'; }
   } finally {
-    btn.disabled = false;
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function checkUpdate() {
+  const msg = document.getElementById('upd-msg');
+  const btn = document.getElementById('btn-check-update');
+  if (btn) btn.disabled = true;
+  if (msg) { msg.textContent = 'Checking GitHub…'; msg.className = 'msg'; }
+  try {
+    const r = await fetch('/api/check-update', { method: 'POST' });
+    const j = await r.json();
+    if (msg) {
+      msg.textContent = j.message || 'Done';
+      msg.className = 'msg' + (j.ok ? ' ok' : ' err');
+    }
+  } catch (e) {
+    if (msg) { msg.textContent = 'Check failed: ' + e; msg.className = 'msg err'; }
+  } finally {
+    if (btn) btn.disabled = false;
+    refresh();
+  }
+}
+
+async function saveAutoUpdate() {
+  const on = document.getElementById('auto-update').checked;
+  const msg = document.getElementById('upd-msg');
+  try {
+    const r = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ auto_update: on }),
+    });
+    const j = await r.json();
+    if (msg) {
+      msg.textContent = j.message || (on ? 'Auto-update on' : 'Auto-update off');
+      msg.className = 'msg ok';
+    }
+  } catch (e) {
+    if (msg) { msg.textContent = String(e); msg.className = 'msg err'; }
   }
 }
 
 document.getElementById('btn-connect').addEventListener('click', connect);
 document.getElementById('btn-discover').addEventListener('click', autoFind);
 document.getElementById('btn-update').addEventListener('click', updateNow);
+document.getElementById('btn-update-now2').addEventListener('click', updateNow);
+document.getElementById('btn-check-update').addEventListener('click', checkUpdate);
+document.getElementById('auto-update').addEventListener('change', saveAutoUpdate);
 document.getElementById('peer').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') connect();
 });

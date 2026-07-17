@@ -32,6 +32,26 @@ struct StatusResponse {
     setup_complete: bool,
     #[serde(default)]
     friendly_status: String,
+    #[serde(default)]
+    update_available: Option<String>,
+    #[serde(default = "default_auto_update")]
+    auto_update: bool,
+}
+
+fn default_auto_update() -> bool {
+    true
+}
+
+#[derive(Debug, Deserialize)]
+struct CheckUpdateResponse {
+    #[serde(default)]
+    ok: bool,
+    #[serde(default)]
+    message: String,
+    #[serde(default)]
+    update_available: Option<String>,
+    #[serde(default)]
+    current: Option<String>,
 }
 
 struct GatewayApp {
@@ -43,6 +63,9 @@ struct GatewayApp {
     help_open: bool,
     password: String,
     tunnel_port: String,
+    auto_update: bool,
+    update_check_msg: String,
+    checked_updates_on_open: bool,
     error: Option<String>,
     client: reqwest::blocking::Client,
 }
@@ -61,6 +84,9 @@ impl GatewayApp {
             help_open: true,
             password: String::new(),
             tunnel_port: "47900".into(),
+            auto_update: true,
+            update_check_msg: String::new(),
+            checked_updates_on_open: false,
             error: None,
             client: reqwest::blocking::Client::builder()
                 .timeout(Duration::from_millis(800))
@@ -84,6 +110,7 @@ impl GatewayApp {
                     if !s.setup_complete {
                         self.help_open = true;
                     }
+                    self.auto_update = s.auto_update;
                     self.status = s;
                     self.error = None;
                 }
@@ -98,6 +125,39 @@ impl GatewayApp {
             }
         }
         self.last_fetch = Instant::now();
+    }
+
+    fn check_for_updates(&mut self) {
+        self.push_log("Checking for updates…");
+        let slow = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(25))
+            .build()
+            .unwrap_or_else(|_| self.client.clone());
+        match slow
+            .post(format!("{}/api/check-update", self.api))
+            .send()
+        {
+            Ok(resp) => match resp.json::<CheckUpdateResponse>() {
+                Ok(r) => {
+                    self.update_check_msg = r.message.clone();
+                    self.push_log(&r.message);
+                    if let Some(v) = r.update_available {
+                        self.status.update_available = Some(v);
+                    } else if r.ok {
+                        self.status.update_available = None;
+                    }
+                }
+                Err(e) => {
+                    self.update_check_msg = format!("Could not parse update response: {e}");
+                    self.push_log(self.update_check_msg.clone());
+                }
+            },
+            Err(e) => {
+                self.update_check_msg = format!("Update check failed: {e}");
+                self.push_log(self.update_check_msg.clone());
+            }
+        }
+        self.refresh();
     }
 
     fn post(&mut self, path: &str) {
@@ -115,6 +175,19 @@ impl eframe::App for GatewayApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.last_fetch.elapsed() > Duration::from_millis(500) {
             self.refresh();
+            // Host already checked GitHub on its own start; surface that here.
+            if !self.checked_updates_on_open && self.error.is_none() {
+                self.checked_updates_on_open = true;
+                if let Some(v) = self.status.update_available.clone() {
+                    self.push_log(format!("Update available: v{v} — open Settings to install"));
+                    self.update_check_msg = format!("Update available: v{v}");
+                } else {
+                    self.push_log(format!(
+                        "Up to date (v{})",
+                        self.status.state.version
+                    ));
+                }
+            }
         }
         ctx.request_repaint_after(Duration::from_millis(250));
 
@@ -321,28 +394,70 @@ impl eframe::App for GatewayApp {
             egui::Window::new("Settings")
                 .collapsible(false)
                 .resizable(true)
+                .default_width(420.0)
                 .show(ctx, |ui| {
+                    ui.heading("Tunnel");
                     ui.label("Tunnel port");
                     ui.text_edit_singleline(&mut self.tunnel_port);
                     ui.label("Optional password (same on laptop)");
                     ui.text_edit_singleline(&mut self.password);
-                    if ui.button("Save").clicked() {
-                        let port: u16 = self.tunnel_port.parse().unwrap_or(47900);
-                        let body = serde_json::json!({
-                            "tunnel_port": port,
-                            "password": self.password,
-                        });
-                        let _ = self
-                            .client
-                            .post(format!("{}/api/settings", self.api))
-                            .json(&body)
-                            .send();
-                        self.push_log("Settings saved");
-                        self.settings_open = false;
+
+                    ui.add_space(12.0);
+                    ui.heading("Updates");
+                    ui.label(format!(
+                        "Installed version: v{}",
+                        if self.status.state.version.is_empty() {
+                            "?".into()
+                        } else {
+                            self.status.state.version.clone()
+                        }
+                    ));
+                    ui.checkbox(&mut self.auto_update, "Automatically install updates when idle");
+                    if !self.update_check_msg.is_empty() {
+                        ui.label(
+                            egui::RichText::new(&self.update_check_msg)
+                                .color(egui::Color32::from_rgb(0, 180, 200)),
+                        );
                     }
-                    if ui.button("Close").clicked() {
-                        self.settings_open = false;
+                    if let Some(v) = &self.status.update_available {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(60, 180, 120),
+                            format!("Update available: v{v}"),
+                        );
                     }
+                    ui.horizontal(|ui| {
+                        if ui.button("Check for updates").clicked() {
+                            self.check_for_updates();
+                        }
+                        if self.status.update_available.is_some()
+                            && ui.button("Update now").clicked()
+                        {
+                            self.post("/api/update");
+                            self.push_log("Update requested — app will restart shortly");
+                        }
+                    });
+
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Save").clicked() {
+                            let port: u16 = self.tunnel_port.parse().unwrap_or(47900);
+                            let body = serde_json::json!({
+                                "tunnel_port": port,
+                                "password": self.password,
+                                "auto_update": self.auto_update,
+                            });
+                            let _ = self
+                                .client
+                                .post(format!("{}/api/settings", self.api))
+                                .json(&body)
+                                .send();
+                            self.push_log("Settings saved");
+                            self.settings_open = false;
+                        }
+                        if ui.button("Close").clicked() {
+                            self.settings_open = false;
+                        }
+                    });
                 });
         }
     }

@@ -362,6 +362,23 @@
         </div>
       </div>
 
+      <div class="section help" id="updates-settings">
+        <div class="title">Updates</div>
+        <p style="margin:0 0 0.6rem;color:var(--muted);font-size:0.88rem">
+          Installed <strong id="upd-cur">v?</strong>.
+          Host checks GitHub every time it starts.
+        </p>
+        <label style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.65rem;font-size:0.9rem">
+          <input type="checkbox" id="auto-update" onchange="saveAutoUpdate()"/>
+          Automatically install updates when idle
+        </label>
+        <div class="actions" style="display:flex;gap:0.5rem;flex-wrap:wrap">
+          <button type="button" class="primary" onclick="checkUpdate()">Check for updates</button>
+          <button type="button" id="btn-update-now" style="display:none" onclick="post('/api/update')">Update now</button>
+        </div>
+        <p id="upd-msg" style="margin:0.55rem 0 0;color:var(--muted);font-size:0.86rem"></p>
+      </div>
+
       <div class="section help" id="ista-box">
         <div class="title">ISTA / E-Sys checklist</div>
         <ol>
@@ -577,6 +594,13 @@ function renderStatus(s) {
   const upd = s.update_available;
   document.getElementById('update-box').style.display = upd ? 'block' : 'none';
   if (upd) document.getElementById('update-txt').textContent = 'v' + upd + ' — installs when idle, or click Update now';
+  const ver = (s.state && s.state.version) || '?';
+  const curEl = document.getElementById('upd-cur');
+  if (curEl) curEl.textContent = 'v' + ver;
+  const autoEl = document.getElementById('auto-update');
+  if (autoEl && document.activeElement !== autoEl) autoEl.checked = !!s.auto_update;
+  const nowBtn = document.getElementById('btn-update-now');
+  if (nowBtn) nowBtn.style.display = upd ? 'inline-block' : 'none';
 
   const hints = s.setup_hints || [];
   document.getElementById('hints').innerHTML = hints.map(h => '<li>' + escapeHtml(h) + '</li>').join('');
@@ -598,6 +622,35 @@ async function copyText(t) {
 
 function copyPair() {
   copyText(document.getElementById('pair').textContent || '');
+}
+
+async function checkUpdate() {
+  const msg = document.getElementById('upd-msg');
+  if (msg) msg.textContent = 'Checking GitHub for a newer release…';
+  try {
+    const r = await fetch('/api/check-update', { method: 'POST' });
+    const j = await r.json();
+    if (msg) msg.textContent = j.message || 'Done';
+    pushLocal('info', j.message || 'Update check done');
+    await refreshNow();
+  } catch (e) {
+    if (msg) msg.textContent = String(e);
+    pushLocal('error', String(e));
+  }
+}
+
+async function saveAutoUpdate() {
+  const on = document.getElementById('auto-update').checked;
+  try {
+    await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ auto_update: on }),
+    });
+    pushLocal('info', on ? 'Auto-update enabled' : 'Auto-update disabled');
+  } catch (e) {
+    pushLocal('error', String(e));
+  }
 }
 
 async function refreshNow() {
