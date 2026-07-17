@@ -65,13 +65,23 @@ fn build_host_ethernet(cfg: &GatewayConfig, simulate: bool) -> HostEthernet {
     {
         if !enet_tunnel::PcapEthernet::npcap_available() {
             eprintln!();
-            eprintln!("  *** ISTA will NOT see the car yet ***");
-            eprintln!("  Install Npcap: https://npcap.com  (enable WinPcap API compatibility)");
-            eprintln!("  Re-run BMW-ENET-Setup (Host) to create BMW-ENET at {}", cfg.tester_ip);
-            eprintln!("  Tunnel stays up for connection testing; L2/ISTA path is inactive.");
+            eprintln!("  *** Npcap not found — launching installer ***");
+            eprintln!("  Enable “WinPcap API-compatible Mode”, then Finish.");
             eprintln!();
-            warn!("Npcap missing — Host L2 disabled");
-            return fallback("Npcap not installed");
+            let installed = enet_core::ensure_npcap_installed(|msg| {
+                eprintln!("  {msg}");
+            })
+            .unwrap_or(false);
+            if !installed || !enet_tunnel::PcapEthernet::npcap_available() {
+                eprintln!();
+                eprintln!("  *** ISTA will NOT see the car yet ***");
+                eprintln!("  Install Npcap: https://npcap.com  (enable WinPcap API compatibility)");
+                eprintln!("  Re-run BMW-ENET-Setup (Host) to create BMW-ENET at {}", cfg.tester_ip);
+                eprintln!("  Tunnel stays up for connection testing; L2/ISTA path is inactive.");
+                eprintln!();
+                warn!("Npcap missing — Host L2 disabled");
+                return fallback("Npcap not installed");
+            }
         }
         let candidates = [
             cfg.virtual_interface.as_str(),

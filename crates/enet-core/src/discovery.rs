@@ -143,7 +143,7 @@ pub fn adapter_link_up(name: &str) -> bool {
     static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
     if let Ok(guard) = CACHE.lock() {
         if let Some(c) = guard.as_ref() {
-            if c.name.eq_ignore_ascii_case(name) && c.at.elapsed() < Duration::from_secs(5) {
+            if c.name.eq_ignore_ascii_case(name) && c.at.elapsed() < Duration::from_secs(2) {
                 return c.up;
             }
         }
@@ -167,24 +167,13 @@ fn adapter_link_up_uncached(name: &str) -> bool {
         /// Hide console windows — visible PowerShell flashing every few seconds is unusable.
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-        // Prefer netsh (no PowerShell host window).
-        let name_arg = format!("name=\"{name}\"");
-        if let Ok(out) = Command::new("netsh")
-            .args(["interface", "show", "interface", &name_arg])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output()
-        {
-            let text = String::from_utf8_lossy(&out.stdout).to_lowercase();
-            if let Some(line) = text.lines().find(|l| l.contains("connect state")) {
-                // Exact token check — "disconnected" also contains "connected".
-                let state = line.split(':').nth(1).unwrap_or("").trim();
-                return state == "connected";
-            }
-        }
-
-        // Fallback: PowerShell, forced hidden.
+        // Primary: MediaConnectionState — Status=Up is often true for USB-ENET
+        // dongles even when no Ethernet cable is in the car.
         let script = format!(
-            "$a = Get-NetAdapter -Name '{}' -ErrorAction SilentlyContinue; if ($null -eq $a) {{ exit 2 }}; if ($a.Status -eq 'Up') {{ exit 0 }} else {{ exit 1 }}",
+            "$a = Get-NetAdapter -Name '{}' -ErrorAction SilentlyContinue; \
+             if ($null -eq $a) {{ exit 2 }}; \
+             if ($a.MediaConnectionState -eq 'Connected') {{ exit 0 }}; \
+             exit 1",
             name.replace('\'', "''")
         );
         match Command::new("powershell")
@@ -201,8 +190,28 @@ fn adapter_link_up_uncached(name: &str) -> bool {
         {
             Ok(s) if s.success() => return true,
             Ok(s) if s.code() == Some(1) => return false,
+            Ok(s) if s.code() == Some(2) => return false,
             _ => {}
         }
+
+        // Fallback: netsh connect state (weaker — admin "connected", not media).
+        let name_arg = format!("name=\"{name}\"");
+        if let Ok(out) = Command::new("netsh")
+            .args(["interface", "show", "interface", &name_arg])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+        {
+            let text = String::from_utf8_lossy(&out.stdout).to_lowercase();
+            if let Some(line) = text.lines().find(|l| l.contains("connect state")) {
+                // Exact token check — "disconnected" also contains "connected".
+                let state = line.split(':').nth(1).unwrap_or("").trim();
+                return state == "connected";
+            }
+        }
+
+        // Do NOT fall back to traffic counters / default-true is_up — that made
+        // Vehicle ENET show green whenever the USB dongle was present.
+        return false;
     }
     #[cfg(unix)]
     {
@@ -218,12 +227,13 @@ fn adapter_link_up_uncached(name: &str) -> bool {
         if let Ok(v) = std::fs::read_to_string(&oper) {
             return v.trim() == "up";
         }
+        false
     }
-    detect_candidate_interfaces()
-        .into_iter()
-        .find(|i| i.name.eq_ignore_ascii_case(name))
-        .map(|i| i.is_up)
-        .unwrap_or(false)
+    #[cfg(not(any(windows, unix)))]
+    {
+        let _ = name;
+        false
+    }
 }
 
 /// Pick the best ENET candidate, if any.

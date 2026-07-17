@@ -134,9 +134,10 @@ impl RelayTunnelEngine {
                                         stats.record_tx(pkt.len());
                                         if is_agent {
                                             let mut st = state.write();
-                                            st.vehicle.awake = true;
-                                            st.vehicle.link_up = true;
                                             st.vehicle.last_activity_ms = now_ms();
+                                            if st.vehicle.link_up {
+                                                st.vehicle.awake = true;
+                                            }
                                         }
                                     }
                                     Err(e) => {
@@ -214,11 +215,12 @@ impl RelayTunnelEngine {
                                         st.laptop_connected = true;
                                         st.status_message = "Connected via relay".into();
                                         st.peer_endpoint = Some(format!("relay:{relay_url}"));
-                                        // Tunnel Ethernet on the gateway means car-side traffic via laptop.
+                                        // Tunnel Ethernet on the gateway ⇒ awake; link from Status only.
                                         if opts.role == "gateway" {
-                                            st.vehicle.link_up = true;
                                             st.vehicle.last_activity_ms = now_ms();
-                                            st.vehicle.awake = true;
+                                            if st.vehicle.link_up {
+                                                st.vehicle.awake = true;
+                                            }
                                         }
                                     }
                                 }
@@ -315,6 +317,11 @@ impl RelayTunnelEngine {
                         st.vehicle.link_up = link;
                         if !link {
                             st.vehicle.awake = false;
+                        } else if st.vehicle.awake {
+                            let age = now_ms().saturating_sub(st.vehicle.last_activity_ms);
+                            if st.vehicle.last_activity_ms > 0 && age > 10_000 {
+                                st.vehicle.awake = false;
+                            }
                         }
                     }
                     let seq = tx_seq.fetch_add(1, Ordering::Relaxed);

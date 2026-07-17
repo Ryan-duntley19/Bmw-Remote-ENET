@@ -281,36 +281,39 @@ fn read_pair_code(path: &Path) -> Option<String> {
 
 #[cfg(windows)]
 fn npcap_installed() -> bool {
-    Path::new(r"C:\Windows\System32\Npcap\wpcap.dll").is_file()
-        || Path::new(r"C:\Windows\System32\wpcap.dll").is_file()
-        || Path::new(r"C:\Windows\SysWOW64\Npcap\wpcap.dll").is_file()
+    enet_core::npcap_installed()
 }
 
 #[cfg(windows)]
 fn ensure_npcap(role: Role, progress: &ProgressFn) {
-    if npcap_installed() {
-        progress(0, 0, "Npcap found — L2 capture/inject available");
-        return;
-    }
-    progress(
-        0,
-        0,
-        "Npcap is REQUIRED for ISTA (car frames). Opening download page…",
-    );
-    let _ = Command::new("cmd")
-        .args(["/C", "start", "", "https://npcap.com/#download"])
-        .status();
     let who = match role {
         Role::Host => "desktop Host (ISTA adapter)",
         Role::Client => "laptop Client (ENET cable)",
     };
-    progress(
-        0,
-        0,
-        &format!(
-            "Install Npcap for the {who}, enable “WinPcap API-compatible Mode”, then re-run Setup or restart the app"
-        ),
-    );
+    let mut last = String::new();
+    match enet_core::ensure_npcap_installed(|msg| {
+        if msg != last {
+            progress(0, 0, msg);
+            last = msg.to_string();
+        }
+    }) {
+        Ok(true) => {}
+        Ok(false) => {
+            progress(
+                0,
+                0,
+                &format!(
+                    "Install Npcap for the {who} with “WinPcap API-compatible Mode”, then restart BMW ENET"
+                ),
+            );
+        }
+        Err(e) => {
+            progress(0, 0, &format!("Npcap install helper failed: {e:#}"));
+            let _ = Command::new("cmd")
+                .args(["/C", "start", "", "https://npcap.com/#download"])
+                .status();
+        }
+    }
 }
 
 /// Create Microsoft Loopback “BMW-ENET” at 169.254.1.1/16 for ISTA / E-Sys.

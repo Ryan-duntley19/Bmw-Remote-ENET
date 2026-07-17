@@ -297,7 +297,7 @@ impl eframe::App for SetupApp {
                         Some(false) => {
                             ui.colored_label(
                                 WARN_AMBER,
-                                "⚠ Npcap not detected. Setup will open npcap.com — install it (WinPcap mode) for ISTA.",
+                                "⚠ Npcap not detected. Setup will download & launch the Npcap installer (enable WinPcap mode) for ISTA.",
                             );
                         }
                         None => {}
@@ -408,7 +408,7 @@ impl eframe::App for SetupApp {
                         ui.add_space(6.0);
                         ui.colored_label(
                             WARN_AMBER,
-                            "⚠ Npcap missing — Setup will open the download page. ISTA needs it on BOTH PCs.",
+                            "⚠ Npcap missing — Setup downloads & launches the installer. ISTA needs it on BOTH PCs.",
                         );
                     }
 

@@ -267,53 +267,70 @@ async fn build_ethernet_port(
     #[cfg(windows)]
     {
         if !enet_tunnel::PcapEthernet::npcap_available() {
-            *l2_label.write() = "Npcap not installed".into();
             eprintln!();
-            eprintln!("  *** Npcap required for ISTA ***");
-            eprintln!("  Install from https://npcap.com (enable WinPcap API compatibility),");
-            eprintln!("  then restart BMW ENET Client.");
-            eprintln!("  Tunnel can still connect, but car frames will NOT reach the desktop.");
+            eprintln!("  *** Npcap not found — launching installer ***");
+            eprintln!("  Enable “WinPcap API-compatible Mode”, then Finish.");
             eprintln!();
-        } else if let Some(iface) = pick_enet_interface(cfg.enet_interface.as_str()) {
-            // Only open the scored ENET candidate — never the Wi‑Fi / LAN tunnel NIC.
-            let try_open = |target: &str| enet_tunnel::PcapEthernet::open(target).ok();
-            let opened = try_open(&iface.name).or_else(|| {
-                // Fall back: match Npcap description against the OS adapter name.
-                let want = iface.name.to_lowercase();
-                enet_tunnel::PcapEthernet::list_devices()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .find(|line| line.to_lowercase().contains(&want))
-                    .and_then(|line| {
-                        let npf = line.split('|').next().unwrap_or(&line).to_string();
-                        try_open(&npf)
-                    })
-            });
-            if let Some(port) = opened {
-                let shown = port.display_name().to_string();
-                info!(adapter = %port.name(), %shown, "Client L2 ENET capture ready");
-                // Keep the OS adapter name so the carrier refresher can poll it.
-                *enet_name.write() = iface.name.clone();
-                *l2_label.write() = shown.clone();
-                l2_active.store(true, Ordering::Relaxed);
-                enet_link.store(adapter_link_up(&iface.name), Ordering::Relaxed);
-                eprintln!("  ENET capture: {shown}");
-                return Ok(Arc::new(LinkedPcap {
-                    inner: port,
-                    link: enet_link.clone(),
-                }));
+            let installed = tokio::task::spawn_blocking(|| {
+                enet_core::ensure_npcap_installed(|msg| {
+                    eprintln!("  {msg}");
+                })
+                .unwrap_or(false)
+            })
+            .await
+            .unwrap_or(false);
+            if !installed || !enet_tunnel::PcapEthernet::npcap_available() {
+                *l2_label.write() = "Npcap not installed".into();
+                eprintln!();
+                eprintln!("  *** Npcap required for ISTA ***");
+                eprintln!("  Install from https://npcap.com (enable WinPcap API compatibility),");
+                eprintln!("  then restart BMW ENET Client.");
+                eprintln!("  Tunnel can still connect, but car frames will NOT reach the desktop.");
+                eprintln!();
             }
-            *l2_label.write() = format!("Npcap could not open {}", iface.name);
-            eprintln!();
-            eprintln!("  Could not open Npcap on ENET adapter '{}'.", iface.name);
-            eprintln!("  Run Client as Administrator / SYSTEM and confirm Npcap is installed.");
-            eprintln!();
-        } else {
-            *l2_label.write() = "waiting for ENET adapter".into();
-            eprintln!();
-            eprintln!("  Npcap is installed but no ENET adapter was detected yet.");
-            eprintln!("  Plug the ENET cable into the car + laptop, then restart Client.");
-            eprintln!();
+        }
+        if enet_tunnel::PcapEthernet::npcap_available() {
+            if let Some(iface) = pick_enet_interface(cfg.enet_interface.as_str()) {
+                // Only open the scored ENET candidate — never the Wi‑Fi / LAN tunnel NIC.
+                let try_open = |target: &str| enet_tunnel::PcapEthernet::open(target).ok();
+                let opened = try_open(&iface.name).or_else(|| {
+                    // Fall back: match Npcap description against the OS adapter name.
+                    let want = iface.name.to_lowercase();
+                    enet_tunnel::PcapEthernet::list_devices()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .find(|line| line.to_lowercase().contains(&want))
+                        .and_then(|line| {
+                            let npf = line.split('|').next().unwrap_or(&line).to_string();
+                            try_open(&npf)
+                        })
+                });
+                if let Some(port) = opened {
+                    let shown = port.display_name().to_string();
+                    info!(adapter = %port.name(), %shown, "Client L2 ENET capture ready");
+                    // Keep the OS adapter name so the carrier refresher can poll it.
+                    *enet_name.write() = iface.name.clone();
+                    *l2_label.write() = shown.clone();
+                    l2_active.store(true, Ordering::Relaxed);
+                    enet_link.store(adapter_link_up(&iface.name), Ordering::Relaxed);
+                    eprintln!("  ENET capture: {shown}");
+                    return Ok(Arc::new(LinkedPcap {
+                        inner: port,
+                        link: enet_link.clone(),
+                    }));
+                }
+                *l2_label.write() = format!("Npcap could not open {}", iface.name);
+                eprintln!();
+                eprintln!("  Could not open Npcap on ENET adapter '{}'.", iface.name);
+                eprintln!("  Run Client as Administrator / SYSTEM and confirm Npcap is installed.");
+                eprintln!();
+            } else {
+                *l2_label.write() = "waiting for ENET adapter".into();
+                eprintln!();
+                eprintln!("  Npcap is installed but no ENET adapter was detected yet.");
+                eprintln!("  Plug the ENET cable into the car + laptop, then restart Client.");
+                eprintln!();
+            }
         }
     }
     #[cfg(not(windows))]
@@ -579,8 +596,8 @@ async fn api_status(State(live): State<Arc<LiveStatus>>) -> Json<StatusJson> {
             (false, false, false, 0.0, 0.0, "searching")
         }
     };
-    // OS carrier drives the cable indicator; tunnel link is a secondary hint.
-    let enet = live.enet_link.load(Ordering::Relaxed) || vehicle_link;
+    // OS carrier alone drives the cable / Vehicle ENET indicator.
+    let enet = live.enet_link.load(Ordering::Relaxed);
     let desktop_connected = desktop;
     let friendly = match conn_label {
         "searching" => {
@@ -867,7 +884,7 @@ async fn run_until_stop(handle: TunnelHandle, live: Arc<LiveStatus>) {
                 let (_last, rtt_p99, _loss) = handle.stats.peek_quality();
                 let desk = matches!(st.connection, ConnectionState::Connected)
                     || st.laptop_connected;
-                let enet = live.enet_link.load(Ordering::Relaxed) || st.vehicle.link_up;
+                let enet = live.enet_link.load(Ordering::Relaxed);
                 let line = format!(
                     "[Desktop: {}] [ENET: {}] [Vehicle: {}]  RTT {:.0} ms",
                     if desk { "OK" } else { "…" },

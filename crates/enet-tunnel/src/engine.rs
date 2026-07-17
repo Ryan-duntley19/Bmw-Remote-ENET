@@ -168,8 +168,10 @@ impl TunnelEngine {
                                             if is_agent {
                                                 let mut st = state.write();
                                                 st.vehicle.last_activity_ms = now_ms();
-                                                st.vehicle.awake = true;
-                                                st.vehicle.link_up = true;
+                                                // Awake = recent car traffic; link_up is OS carrier only.
+                                                if st.vehicle.link_up {
+                                                    st.vehicle.awake = true;
+                                                }
                                             }
                                         }
                                     }
@@ -311,11 +313,12 @@ impl TunnelEngine {
                                                 st.connection = ConnectionState::Connected;
                                                 st.laptop_connected = true;
                                                 st.status_message = "Connected".into();
-                                                // Gateway: tunnel Ethernet arrived from the car via the laptop.
+                                                // Gateway: car traffic via laptop ⇒ awake; link comes from Status.
                                                 if opts.role == "gateway" {
-                                                    st.vehicle.link_up = true;
                                                     st.vehicle.last_activity_ms = now_ms();
-                                                    st.vehicle.awake = true;
+                                                    if st.vehicle.link_up {
+                                                        st.vehicle.awake = true;
+                                                    }
                                                 }
                                             }
                                         }
@@ -481,6 +484,12 @@ impl TunnelEngine {
                         st.vehicle.link_up = link;
                         if !link {
                             st.vehicle.awake = false;
+                        } else if st.vehicle.awake {
+                            // Expire awake without recent frames (noise / unplugged car).
+                            let age = now_ms().saturating_sub(st.vehicle.last_activity_ms);
+                            if st.vehicle.last_activity_ms > 0 && age > 10_000 {
+                                st.vehicle.awake = false;
+                            }
                         }
                     }
                     let send_status = opts.role != "agent" || tick % 4 == 0;

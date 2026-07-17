@@ -7,6 +7,7 @@ pub mod discovery;
 pub mod health;
 pub mod lan_discovery;
 pub mod logging;
+pub mod npcap;
 pub mod safety;
 pub mod stats;
 pub mod state;
@@ -23,6 +24,7 @@ pub use lan_discovery::{
     pick_reachable_host_ip, run_gateway_beacon,
 };
 pub use logging::init_logging;
+pub use npcap::{ensure_npcap_installed, npcap_installed, NPCAP_INSTALLER_URL};
 pub use safety::{FlashSafetyChecker, FlashSafetyReport, SafetyThresholds};
 pub use stats::PacketStats;
 pub use state::{ConnectionState, GatewayState, VehicleState};
