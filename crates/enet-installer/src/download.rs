@@ -9,7 +9,7 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 /// Default GitHub repository that publishes Windows packages.
-pub const DEFAULT_REPO: &str = "Ryan-duntley19/test";
+pub const DEFAULT_REPO: &str = "Ryan-duntley19/Bmw-Remote-ENET";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {

@@ -1,8 +1,8 @@
 # BMW ENET Gateway — Claude Code brief
 
-Private GitHub repo: `https://github.com/Ryan-duntley19/test`  
+Private GitHub repo: `https://github.com/Ryan-duntley19/Bmw-Remote-ENET`  
 Active branch: `cursor/remote-enet-gateway-0b54`  
-PR: https://github.com/Ryan-duntley19/test/pull/3  
+PR: https://github.com/Ryan-duntley19/Bmw-Remote-ENET/pull/3  
 Latest tag: **v0.1.18** (ISTA L2 path)
 
 ## What this project is

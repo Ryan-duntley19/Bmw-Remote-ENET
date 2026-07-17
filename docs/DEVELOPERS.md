@@ -1,6 +1,6 @@
 # Developer guide
 
-End users should **not** build from source. Download **`BMW-ENET-Setup.exe`** from [Releases](https://github.com/Ryan-duntley19/test/releases).
+End users should **not** build from source. Download **`BMW-ENET-Setup.exe`** from [Releases](https://github.com/Ryan-duntley19/Bmw-Remote-ENET/releases).
 
 ## Build on Windows
 
