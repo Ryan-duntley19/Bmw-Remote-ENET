@@ -28,3 +28,4 @@ pub use npcap::{ensure_npcap_installed, npcap_installed, NPCAP_INSTALLER_URL};
 pub use safety::{FlashSafetyChecker, FlashSafetyReport, SafetyThresholds};
 pub use stats::PacketStats;
 pub use state::{ConnectionState, GatewayState, VehicleState};
+pub use updater::{default_github_repo, github_repo_slug};

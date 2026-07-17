@@ -1,9 +1,8 @@
 # BMW ENET Gateway — Claude Code brief
 
-Private GitHub repo: `https://github.com/Ryan-duntley19/Bmw-Remote-ENET`  
 Active branch: `cursor/remote-enet-gateway-0b54`  
-PR: https://github.com/Ryan-duntley19/Bmw-Remote-ENET/pull/3  
-Latest tag: **v0.1.25** (Vehicle ENET = media carrier only; Npcap auto-download/launch)
+PR: #3  
+Latest tag: **v0.1.27** (scrub hardcoded personal GitHub username from source)
 
 ## What this project is
 

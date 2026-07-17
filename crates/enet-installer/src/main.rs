@@ -5,7 +5,7 @@ mod download;
 mod install;
 
 use clap::Parser;
-use download::{Role, DEFAULT_REPO};
+use download::Role;
 use eframe::egui;
 use install::InstallRequest;
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ use std::thread;
 #[command(name = "BMW-ENET-Setup")]
 struct Args {
     /// GitHub repo that publishes release assets (owner/name)
-    #[arg(long, default_value = DEFAULT_REPO)]
+    #[arg(long, default_value_t = download::default_repo())]
     repo: String,
     /// Skip GUI and install host or client from CLI
     #[arg(long)]

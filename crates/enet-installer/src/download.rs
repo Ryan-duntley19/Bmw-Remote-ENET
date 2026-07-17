@@ -8,8 +8,10 @@ use std::io::{self, Read, Write};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
-/// Default GitHub repository that publishes Windows packages.
-pub const DEFAULT_REPO: &str = "Ryan-duntley19/Bmw-Remote-ENET";
+/// Default GitHub `owner/name` for Releases downloads (from build-time git/CI).
+pub fn default_repo() -> String {
+    enet_core::default_github_repo()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {

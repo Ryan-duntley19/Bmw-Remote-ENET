@@ -24,11 +24,10 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.1.26"
+version = "0.1.27"
 edition = "2021"
 license = "MIT"
 authors = ["BMW ENET Gateway Contributors"]
-repository = "https://github.com/Ryan-duntley19/Bmw-Remote-ENET"
 rust-version = "1.75"
 
 [workspace.dependencies]

@@ -192,7 +192,7 @@ impl Default for GatewayConfig {
             wireguard_desktop_ip: "10.66.0.1".into(),
             wireguard_laptop_ip: "10.66.0.2".into(),
             auto_update: true,
-            update_repo: "Ryan-duntley19/Bmw-Remote-ENET".into(),
+            update_repo: crate::updater::default_github_repo(),
             update_token: String::new(),
         }
     }

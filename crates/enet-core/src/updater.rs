@@ -368,6 +368,54 @@ pub fn install_dir() -> anyhow::Result<PathBuf> {
         .to_path_buf())
 }
 
+/// Default `owner/name` for GitHub Releases (injected at build time from git/CI).
+pub fn default_github_repo() -> String {
+    let raw = env!("BMW_ENET_GITHUB_REPO");
+    if raw.is_empty() {
+        String::new()
+    } else {
+        raw.to_string()
+    }
+}
+
+/// Parse `owner/name` from a GitHub URL (`https://github.com/owner/name`) or slug.
+pub fn github_repo_slug(from: &str) -> Option<String> {
+    let s = from.trim().trim_end_matches('/');
+    if let Some(rest) = s
+        .strip_prefix("https://github.com/")
+        .or_else(|| s.strip_prefix("http://github.com/"))
+    {
+        let mut parts = rest.split('/').filter(|p| !p.is_empty());
+        let owner = parts.next()?;
+        let name = parts.next()?.trim_end_matches(".git");
+        if owner.is_empty() || name.is_empty() {
+            return None;
+        }
+        return Some(format!("{owner}/{name}"));
+    }
+    // https://token@github.com/owner/name
+    if let Some(idx) = s.find("github.com/") {
+        let rest = &s[idx + "github.com/".len()..];
+        let mut parts = rest.split('/').filter(|p| !p.is_empty());
+        let owner = parts.next()?;
+        let name = parts.next()?.trim_end_matches(".git");
+        if owner.is_empty() || name.is_empty() {
+            return None;
+        }
+        return Some(format!("{owner}/{name}"));
+    }
+    if s.contains('/') && !s.contains("://") {
+        let mut parts = s.split('/');
+        let owner = parts.next()?;
+        let name = parts.next()?;
+        if owner.is_empty() || name.is_empty() || parts.next().is_some() {
+            return None;
+        }
+        return Some(format!("{owner}/{name}"));
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -378,5 +426,25 @@ mod tests {
         assert_eq!(parse_semver("1.2.3"), Some((1, 2, 3)));
         assert!(parse_semver("v0.1.20") > parse_semver("v0.1.19"));
         assert!(parse_semver("nope").is_none());
+    }
+
+    #[test]
+    fn github_slug_from_url() {
+        assert_eq!(
+            github_repo_slug("https://github.com/acme/Bmw-Remote-ENET"),
+            Some("acme/Bmw-Remote-ENET".into())
+        );
+        assert_eq!(
+            github_repo_slug("https://github.com/acme/Bmw-Remote-ENET.git"),
+            Some("acme/Bmw-Remote-ENET".into())
+        );
+        assert_eq!(
+            github_repo_slug("acme/Bmw-Remote-ENET"),
+            Some("acme/Bmw-Remote-ENET".into())
+        );
+        assert_eq!(
+            github_repo_slug("https://x-access-token:secret@github.com/acme/Bmw-Remote-ENET"),
+            Some("acme/Bmw-Remote-ENET".into())
+        );
     }
 }
