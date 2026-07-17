@@ -1243,7 +1243,7 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
 name = "enet-agent"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1263,7 +1263,7 @@ dependencies = [
 
 [[package]]
 name = "enet-core"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1289,7 +1289,7 @@ dependencies = [
 
 [[package]]
 name = "enet-gateway"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1310,7 +1310,7 @@ dependencies = [
 
 [[package]]
 name = "enet-gui"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1328,7 +1328,7 @@ dependencies = [
 
 [[package]]
 name = "enet-installer"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "anyhow",
  "clap",
@@ -1347,7 +1347,7 @@ dependencies = [
 
 [[package]]
 name = "enet-protocol"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "bytes",
  "chacha20poly1305",
@@ -1363,7 +1363,7 @@ dependencies = [
 
 [[package]]
 name = "enet-relay"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1379,7 +1379,7 @@ dependencies = [
 
 [[package]]
 name = "enet-setup"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "anyhow",
  "clap",
@@ -1392,7 +1392,7 @@ dependencies = [
 
 [[package]]
 name = "enet-sim"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1409,7 +1409,7 @@ dependencies = [
 
 [[package]]
 name = "enet-tunnel"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "anyhow",
  "async-trait",

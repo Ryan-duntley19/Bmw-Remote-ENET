@@ -361,6 +361,12 @@ async fn main() -> anyhow::Result<()> {
     // bind sockets (nothing is connected yet, so restarting is safe).
     if let Ok(dir) = enet_core::updater::install_dir() {
         enet_core::updater::cleanup_stale(&dir);
+        // Second pass after the old process has fully exited (files unlock).
+        let dir2 = dir.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            enet_core::updater::cleanup_stale(&dir2);
+        });
     }
     if cfg.auto_update {
         let cfg_upd = cfg.clone();
@@ -376,7 +382,25 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let (handle, l2_active, l2_label) = start_tunnel(&cfg, &pair_code, args.simulate).await?;
+    // Retry the initial bind — after an update restart the old process may
+    // hold UDP 47900 for a second or two while it exits.
+    let (handle, l2_active, l2_label) = {
+        let mut result = None;
+        for attempt in 0..5u32 {
+            match start_tunnel(&cfg, &pair_code, args.simulate).await {
+                Ok(t) => {
+                    result = Some(t);
+                    break;
+                }
+                Err(e) if attempt < 4 => {
+                    warn!(error = %e, attempt, "tunnel start failed — retrying in 2s");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        result.expect("tunnel start loop")
+    };
 
     // LAN beacon only for same-network mode.
     let beacon = if cfg.network_mode == NetworkMode::Lan {
@@ -587,8 +611,27 @@ async fn main() -> anyhow::Result<()> {
     let api_addr = SocketAddr::from((Ipv4Addr::LOCALHOST, cfg.api_port));
     info!(%api_addr, "dashboard + control API listening");
     let server = tokio::spawn(async move {
-        let listener = tokio::net::TcpListener::bind(api_addr).await.expect("api bind");
-        axum::serve(listener, api).await.expect("api serve");
+        // Retry — the previous instance may hold the port briefly after an update.
+        let mut listener = None;
+        for attempt in 0..10u32 {
+            match tokio::net::TcpListener::bind(api_addr).await {
+                Ok(l) => {
+                    listener = Some(l);
+                    break;
+                }
+                Err(e) => {
+                    warn!(error = %e, attempt, "api bind failed — retrying in 1s");
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            }
+        }
+        let Some(listener) = listener else {
+            warn!("dashboard API could not bind — running headless");
+            return;
+        };
+        if let Err(e) = axum::serve(listener, api).await {
+            warn!(error = %e, "api server stopped");
+        }
     });
 
     if let Some(secs) = args.run_seconds {

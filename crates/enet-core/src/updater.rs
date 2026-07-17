@@ -150,6 +150,32 @@ pub fn download_and_stage(info: &UpdateInfo, install_dir: &Path, token: &str) ->
 
     let reader = std::io::Cursor::new(bytes.as_ref());
     let mut zip = zip::ZipArchive::new(reader).context("open update zip")?;
+
+    // Sanity check BEFORE touching any file: the archive must contain our own
+    // executable, otherwise this is the wrong asset and we'd brick the install.
+    if let Some(exe_name) = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_name().map(|s| s.to_string_lossy().to_string()))
+    {
+        let mut contains_exe = false;
+        for i in 0..zip.len() {
+            let entry = zip.by_index(i).context("scan zip entry")?;
+            if let Some(rel) = entry.enclosed_name() {
+                if rel
+                    .file_name()
+                    .map(|f| f.to_string_lossy().eq_ignore_ascii_case(&exe_name))
+                    .unwrap_or(false)
+                {
+                    contains_exe = true;
+                    break;
+                }
+            }
+        }
+        if !contains_exe {
+            bail!("update zip does not contain {exe_name} — wrong asset, aborting");
+        }
+    }
+
     let mut updated = Vec::new();
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).context("read zip entry")?;
@@ -217,6 +243,11 @@ pub fn restart_self() -> anyhow::Result<()> {
     let exe = std::env::current_exe().context("current exe")?;
     let args: Vec<String> = std::env::args().skip(1).collect();
 
+    let workdir = exe
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -240,6 +271,7 @@ pub fn restart_self() -> anyhow::Result<()> {
         );
         std::process::Command::new("cmd")
             .args(["/C", &cmdline])
+            .current_dir(&workdir)
             .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
             .spawn()
             .context("spawn restart helper")?;
@@ -258,6 +290,7 @@ pub fn restart_self() -> anyhow::Result<()> {
                 exe.display(),
                 arg_str
             ))
+            .current_dir(&workdir)
             .spawn()
             .context("spawn restart helper")?;
     }

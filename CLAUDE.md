@@ -20,8 +20,7 @@ Ports: tunnel UDP **47900**, Host API **47901**, discovery **47902**, Client sta
 - Desktop Host: wired LAN  
 - Laptop Client: Wi‑Fi  
 - Same home router; IPs are **DHCP / not static**  
-- Pair code in use historically: `BMW-2E7H`  
-- Multi-homed desktop: dialing `.187` worked; Host sometimes replies from `.16` (v0.1.13+ learns reply IP)
+- Multi-homed desktop: the Host may reply from a different NIC/IP than the one dialed (v0.1.13+ learns the reply IP)
 
 ## Current product status
 

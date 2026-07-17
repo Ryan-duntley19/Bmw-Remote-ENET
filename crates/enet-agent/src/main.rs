@@ -58,6 +58,21 @@ impl Drop for InstanceGuard {
 }
 
 fn acquire_single_instance() -> Option<InstanceGuard> {
+    // After a self-update restart the old process may need a moment to exit
+    // and release the mutex — retry briefly instead of giving up.
+    for attempt in 0..12u32 {
+        if let Some(g) = try_acquire_instance() {
+            return Some(g);
+        }
+        if attempt == 0 {
+            eprintln!("  Another BMW ENET Agent is running — waiting up to 8s (update restart?)…");
+        }
+        std::thread::sleep(Duration::from_millis(700));
+    }
+    None
+}
+
+fn try_acquire_instance() -> Option<InstanceGuard> {
     #[cfg(windows)]
     {
         extern "system" {
@@ -790,14 +805,25 @@ fn spawn_status_server(live: Arc<LiveStatus>, port: u16) {
             .route("/api/update", post(api_update))
             .with_state(live);
         let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-        match tokio::net::TcpListener::bind(addr).await {
-            Ok(listener) => {
-                info!(%addr, "laptop status page listening");
-                if let Err(e) = axum::serve(listener, app).await {
-                    warn!(error = %e, "status server stopped");
+        // Retry the bind — after an update restart the old process may hold
+        // the port for a second or two while it exits.
+        for attempt in 0..10u32 {
+            match tokio::net::TcpListener::bind(addr).await {
+                Ok(listener) => {
+                    info!(%addr, "laptop status page listening");
+                    if let Err(e) = axum::serve(listener, app).await {
+                        warn!(error = %e, "status server stopped");
+                    }
+                    return;
+                }
+                Err(e) => {
+                    if attempt == 9 {
+                        warn!(error = %e, %port, "could not bind laptop status page");
+                    } else {
+                        tokio::time::sleep(Duration::from_secs(1)).await;
+                    }
                 }
             }
-            Err(e) => warn!(error = %e, %port, "could not bind laptop status page"),
         }
     });
 }
@@ -957,6 +983,12 @@ async fn main() -> anyhow::Result<()> {
     // dial the desktop (nothing is connected yet, so restarting is safe).
     if let Ok(dir) = enet_core::updater::install_dir() {
         enet_core::updater::cleanup_stale(&dir);
+        // Second pass after the old process has fully exited (files unlock).
+        let dir2 = dir.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            enet_core::updater::cleanup_stale(&dir2);
+        });
     }
     if cfg.auto_update {
         let repo = cfg.update_repo.clone();
